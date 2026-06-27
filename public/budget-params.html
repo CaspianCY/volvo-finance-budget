@@ -72,7 +72,8 @@
     <label class="hint" style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:8px">
       <input type="checkbox" id="projChk" onchange="load()"> 顯示全年（後續月份工作天數推估）
     </label>
-    <button class="btn" onclick="exportCsv()" style="margin-left:auto">⬇️ 匯出 CSV</button>
+    <button class="btn" onclick="genBudget()" style="margin-left:auto;background:rgba(52,211,153,.15);color:#34d399;border-color:rgba(52,211,153,.4)" title="用全年推估產生一個預算編列版本，到損益預估頁載入微調">📋 產生年度預算</button>
+    <button class="btn" onclick="exportCsv()">⬇️ 匯出 CSV</button>
   </div>
 
   <div id="basis" class="basis" style="display:none"></div>
@@ -107,6 +108,7 @@
 
   <div class="hint" style="margin-bottom:30px;line-height:1.7">
     <b>用途</b>：把已實現月份（如 2026/1–5）的 DMS 實績反推成編列預算的驅動因子。<br>
+    <b>產生年度預算</b>：按「📋 產生年度預算」會用全年推估（1~5實際＋6~12推估）把後續月份的有費營收與有費料件成本寫成一個編列版本（存進 revenue_budget_plan），之後到「全年損益預算編列」頁選該版本即可載入微調、核定。<br>
     <b>顯示全年</b>：勾選後，結束月之後到 12 月用「工作天數推估」補上（黃色「估」欄）——各月總營收＝日產能(實際Σ營收÷Σ工作天數)×該月工作天數；營收結構/占比/成本率/單車產值沿用實際月份，台數＝日均台數×工作天數。<br>
     <b>有費 / 無費口徑</b>：有費（一般／自費鈑烤／保險鈑烤／延保／票券）採實際營收；<strong>無費（保固／善意／內結／VSA…不收費）以「成本」計入營收</strong>（無費營收＝無費成本、無費材料毛利＝0）。
     <strong>總營收 ＝ 有費營收 ＋ 無費成本</strong>；占比分母為此總營收；材料毛利額實質＝有費營收−有費成本。
@@ -386,6 +388,41 @@ function renderTable(d){
 
   h+='</tbody>';
   document.getElementById('tbl').innerHTML=h;
+}
+
+// 一鍵產生年度預算編列版本：把後續(推估)月份的有費營收(鈑烤/一般/延保)+有費料件成本
+// 寫進 revenue_budget_plan 一個命名版本，之後在「全年損益預算編列」頁載入微調。
+async function genBudget(){
+  if(!_data){ return; }
+  // 需要全年推估才有後續月份的預算值；未勾選就自動開啟並重載
+  if(!document.getElementById('projChk').checked){
+    document.getElementById('projChk').checked = true;
+    await load();
+  }
+  const d=_data;
+  if(!d.projected_months || !d.projected_months.length){
+    alert('沒有可產生的後續月份（結束月已是 12 月、或此年度該廠無實際資料可推估）。'); return;
+  }
+  const det = d.breakdown && d.breakdown.detail;
+  const ver = prompt('預算版本名稱：', `${d.year}預算_初版`);
+  if(!ver || !ver.trim()) return;
+  const items=[];
+  for(const m of d.projected_months){
+    const x=d.per_month[m]||{};
+    const bodywork=Math.round(x.bodywork||0), general=Math.round(x.general||0), extended=Math.round(x.extended||0);
+    // 有費料件成本（與參數頁口徑一致，材料毛利=有費營收-有費成本）；取不到則退用整月成本
+    const paidCost=(det&&det.groups&&det.groups.paid.per_month[m])?Math.round(det.groups.paid.per_month[m].cost):Math.round(x.cost||0);
+    items.push({ month:m, paid:bodywork+general+extended, bodywork, general, extended, cost:paidCost, expense:0 });
+  }
+  try{
+    const r=await fetch('/api/budget-projection/plan',{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ year:parseInt(val('yearSel')), branch:val('branchSel'), version:ver.trim(), items })});
+    const res=await r.json(); if(!r.ok) throw new Error(res.error||'產生失敗');
+    alert(`✓ 已產生年度預算版本「${ver.trim()}」\n` +
+          `　範圍：${d.projected_months[0]}~12月（${res.written} 個月，1~${d.from===1?(d.to):d.to}月維持 DMS 實際）\n` +
+          `　口徑：有費營收(鈑烤/一般/延保) + 有費料件成本，營業費用預設 0\n\n` +
+          `下一步：到「📊 全年損益預算編列」頁，廠別選 ${val('branchSel')}、版本下拉選「${ver.trim()}」即可載入微調、核定。`);
+  }catch(e){ alert('✗ '+(e.message||'產生失敗')); }
 }
 
 function exportCsv(){
