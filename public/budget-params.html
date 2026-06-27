@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📐 預算參數（實績反推） — Volvo Finance Budget</title>
+<style>
+  :root { --text-dim: #94a3b8; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Microsoft JhengHei", sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .sticky-header { position: sticky; top: 0; z-index: 200; background: #0f172a; box-shadow: 0 4px 24px rgba(0,0,0,.6); }
+  .nav { background: #1e293b; border-bottom: 1px solid #2d3f56; padding: 0 24px; display: flex; align-items: center; overflow-x: auto; }
+  .nav-brand { font-size: 15px; font-weight: 700; color: #fff; padding: 16px 0; margin-right: 24px; white-space: nowrap; }
+  .nav-link { padding: 16px 16px; color: var(--text-dim); font-size: 13px; font-weight: 600; text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .nav-link:hover { color: #e2e8f0; }
+  .nav-link.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+  .container { padding: 14px 20px; max-width: 100%; }
+  .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .toolbar select { background: #1a2332; border: 1px solid #2d3f56; color: #e2e8f0; padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  .toolbar select:focus { outline: none; border-color: #3b82f6; }
+  .btn { background: rgba(59,130,246,.15); color: #60a5fa; border: 1px solid rgba(59,130,246,.4);
+    padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .btn:hover { background: rgba(59,130,246,.25); }
+  .hint { font-size: 12px; color: var(--text-dim); }
+  .basis { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: #1a2332; border: 1px solid #2d3f56;
+    border-radius: 10px; padding: 9px 14px; margin-bottom: 12px; font-size: 12px; }
+  .basis .b-on { color: #6ee7b7; } .basis .b-warn { color: #fbbf24; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .card { background: #1a2332; border: 1px solid #2d3f56; border-radius: 10px; padding: 12px 14px; }
+  .card .k { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .card .v { font-size: 22px; font-weight: 900; color: #fff; }
+  .card .sub { font-size: 11px; margin-top: 4px; }
+  .pos { color: #34d399; } .neg { color: #fca5a5; } .dim { color: var(--text-dim); }
+  .grid-wrap { background: #1a2332; border: 1px solid #2d3f56; border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+  .grid-scroll { overflow: auto; }
+  table.pj { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 760px; }
+  table.pj th, table.pj td { padding: 7px 10px; border-bottom: 1px solid rgba(45,63,86,.4); border-right: 1px solid rgba(45,63,86,.2); text-align: right; white-space: nowrap; }
+  table.pj th { background: #16202e; color: #94a3b8; font-weight: 700; position: sticky; top: 0; z-index: 2; }
+  table.pj td.lbl, table.pj th.lbl { text-align: left; position: sticky; left: 0; background: #1a2332; z-index: 1; font-weight: 700; color: #e2e8f0; }
+  table.pj th.lbl { z-index: 3; background: #16202e; }
+  table.pj td.tot { background: #14203a; font-weight: 900; color: #fff; }
+  table.pj tr.section td { background: #16202e; color: #93c5fd; font-weight: 800; }
+  table.pj tr.bold td { font-weight: 900; color: #fff; }
+  .err { color: #fca5a5; font-size: 13px; padding: 10px; }
+</style>
+</head>
+<body>
+<div class="sticky-header">
+  <nav class="nav">
+    <span class="nav-brand">🚗 Volvo 財務預算</span>
+    <a href="/budget-projection.html" class="nav-link">📊 全年損益預算編列</a>
+    <a href="/budget-params.html" class="nav-link active">📐 預算參數（實績反推）</a>
+  </nav>
+</div>
+
+<div class="container">
+  <div class="toolbar">
+    <h2 style="font-size:17px;font-weight:900;color:#fff">📐 預算參數</h2>
+    <select id="yearSel" onchange="load()"></select>
+    <select id="branchSel" onchange="load()">
+      <option value="AMA">AMA</option>
+      <option value="AMC">AMC</option>
+      <option value="AMD">AMD</option>
+      <option value="AME">AME</option>
+      <option value="ALL">四廠合計</option>
+    </select>
+    <span class="hint">期間</span>
+    <select id="fromSel" onchange="load()"></select>
+    <span class="hint">~</span>
+    <select id="toSel" onchange="load()"></select>
+    <span class="hint" id="rangeHint"></span>
+    <button class="btn" onclick="exportCsv()" style="margin-left:auto">⬇️ 匯出 CSV</button>
+  </div>
+
+  <div id="basis" class="basis" style="display:none"></div>
+  <div id="errBox" class="err" style="display:none"></div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="grid-wrap">
+    <div class="grid-scroll">
+      <table class="pj" id="tbl"></table>
+    </div>
+  </div>
+
+  <div class="hint" style="margin-bottom:30px;line-height:1.7">
+    <b>用途</b>：把已實現月份（如 2026/1–5）的 DMS 實績反推成編列預算的驅動因子。<br>
+    <b>營收口徑</b>：總營收＝<code>repair_income.total_untaxed</code> 全帳別加總；有費營收＝一般＋鈑烤＋延保；保固其他＝總營收−有費。占比分母為總營收。<br>
+    <b>工作天數</b>：若 DMS 有日期欄，採該月不重複營業日；否則以月曆「週一~週五」估算（依據列於上方狀態）。<br>
+    <b>進廠台數</b>：若 DMS 有工單／車輛識別欄，採不重複計數；否則無法計算（顯示 —）。<br>
+    <b>單車消費額</b>：整體單車產值＝總營收÷台數；有費客單價＝有費營收÷台數。<br>
+    <b>毛利</b>：毛利額＝總營收−營業成本（成本＝<code>parts_cost</code>，僅料件）；毛利率＝毛利÷總營收。
+  </div>
+</div>
+
+<script>
+let _data = null;
+const MN = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmt(v){ return v==null?'—':Math.round(v).toLocaleString(); }
+function fmt1(v){ return v==null?'—':(Math.round(v*10)/10).toLocaleString(); }
+function pctTxt(v){ return v==null?'—':v+'%'; }
+
+(function init(){
+  const y=document.getElementById('yearSel'), now=new Date().getFullYear();
+  for(let yy=now+1; yy>=now-6; yy--){ const o=document.createElement('option'); o.value=yy; o.textContent=yy+' 年'; if(yy===2026)o.selected=true; y.appendChild(o); }
+  if(!y.value) y.value=now;
+  const f=document.getElementById('fromSel'), t=document.getElementById('toSel');
+  for(let m=1;m<=12;m++){ const a=document.createElement('option'); a.value=m; a.textContent=m+'月'; if(m===1)a.selected=true; f.appendChild(a);
+    const b=document.createElement('option'); b.value=m; b.textContent=m+'月'; if(m===5)b.selected=true; t.appendChild(b); }
+})();
+const val = id => document.getElementById(id).value;
+
+async function load(){
+  const errBox=document.getElementById('errBox'); errBox.style.display='none';
+  let from=parseInt(val('fromSel')), to=parseInt(val('toSel'));
+  if(from>to){ document.getElementById('toSel').value=from; to=from; }
+  document.getElementById('rangeHint').textContent='載入中…';
+  try{
+    const url=`/api/budget-params?year=${val('yearSel')}&branch=${encodeURIComponent(val('branchSel'))}&from=${from}&to=${to}`;
+    const r=await fetch(url); const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'載入失敗');
+    _data=d; render();
+  }catch(e){
+    document.getElementById('rangeHint').textContent='';
+    errBox.textContent='✗ '+esc(e.message); errBox.style.display='block';
+  }
+}
+
+function render(){
+  const d=_data;
+  document.getElementById('rangeHint').textContent=`${d.year}/${d.from}–${d.to}　${d.branch}`;
+
+  // 依據列
+  const b=d.basis||{};
+  const uCls=b.units_source==='unavailable'?'b-warn':'b-on';
+  const wCls=b.workdays_source==='date'?'b-on':'b-warn';
+  document.getElementById('basis').style.display='flex';
+  document.getElementById('basis').innerHTML =
+    `<span class="dim">資料依據：</span>`+
+    `<span class="${wCls}">🗓 工作天數 — ${esc(b.workdays||'')}</span><span class="dim">｜</span>`+
+    `<span class="${uCls}">🚗 台數 — ${esc(b.units||'')}</span>`;
+
+  renderCards(d);
+  renderTable(d);
+}
+
+function renderCards(d){
+  const rev=d.revenue, u=d.units, pc=d.per_car;
+  const gm=d.gross_margin;
+  const cards=[
+    { k:'總營收（合計）', v:fmt(rev.total), sub:`<span class="dim">${d.from}–${d.to}月 ${d.months.length} 個月</span>` },
+    { k:'有費營收', v:fmt(rev.paid), sub:`<span class="dim">占總營收 ${pctTxt(rev.mix.paid)}</span>` },
+    { k:'營業成本', v:fmt(d.cost), sub:`<span class="dim">parts_cost（僅料件）</span>` },
+    { k:'毛利額', v:`<span class="${d.gross_profit>=0?'pos':'neg'}">${fmt(d.gross_profit)}</span>`, sub:`<span class="${gm>=0?'pos':'neg'}">毛利率 ${pctTxt(gm)}</span>` },
+    { k:'工作天數（合計）', v:fmt(d.workdays.total), sub:`<span class="dim">月均 ${fmt1(d.workdays.avg_per_month)} 天</span>` },
+    { k:'進廠台數（合計）', v:u?fmt(u.total):'—', sub:u?`<span class="dim">日均 ${fmt1(u.per_day)}｜月均 ${fmt1(u.per_month)}</span>`:`<span class="b-warn" style="color:#fbbf24">無工單欄位</span>` },
+    { k:'整體單車產值', v:pc?fmt(pc.overall):'—', sub:pc?`<span class="dim">有費客單價 ${fmt(pc.paid)}</span>`:'<span class="dim">需台數</span>' },
+  ];
+  document.getElementById('cards').innerHTML = cards.map(c=>
+    `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="sub">${c.sub}</div></div>`).join('');
+}
+
+// 表：列＝項目，欄＝各月＋合計/平均
+function renderTable(d){
+  const ms=d.months, pm=d.per_month, rev=d.revenue;
+  let h='<thead><tr><th class="lbl">項目</th>';
+  for(const m of ms) h+=`<th>${MN[m-1]}</th>`;
+  h+='<th>合計/平均</th></tr></thead><tbody>';
+
+  const sumRow=(label,pick,total,opts={})=>{
+    const cls=opts.cls||'';
+    let s=`<tr class="${cls}"><td class="lbl">${label}</td>`;
+    for(const m of ms) s+=`<td>${opts.fmt?opts.fmt(pick(pm[m])):fmt(pick(pm[m]))}</td>`;
+    s+=`<td class="tot">${opts.totFmt?opts.totFmt(total):fmt(total)}</td></tr>`;
+    return s;
+  };
+  const pctRow=(label,perMonthPct,totalPct)=>{
+    let s=`<tr><td class="lbl dim">${label}</td>`;
+    for(const m of ms){ const x=pm[m]; const base=x.total>0?x.total:null; const v=base?Math.round(perMonthPct(x)/base*1000)/10:null; s+=`<td class="dim">${pctTxt(v)}</td>`; }
+    s+=`<td class="tot">${pctTxt(totalPct)}</td></tr>`;
+    return s;
+  };
+
+  h+='<tr class="section"><td class="lbl">營收</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
+  h+=sumRow('總營收', x=>x.total, rev.total, {cls:'bold'});
+  h+=sumRow('　有費營收', x=>x.paid, rev.paid);
+  h+=sumRow('　一般', x=>x.general, rev.general);
+  h+=sumRow('　鈑烤', x=>x.bodywork, rev.bodywork);
+  h+=sumRow('　延保', x=>x.extended, rev.extended);
+  h+=sumRow('　保固其他', x=>x.total-(x.paid||0), rev.warranty_other);
+
+  h+='<tr class="section"><td class="lbl">營收占比（÷總營收）</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
+  h+=pctRow('　一般 %', x=>x.general, rev.mix.general);
+  h+=pctRow('　鈑烤 %', x=>x.bodywork, rev.mix.bodywork);
+  h+=pctRow('　延保 %', x=>x.extended, rev.mix.extended);
+  h+=pctRow('　保固其他 %', x=>x.total-(x.paid||0), rev.mix.warranty_other);
+  h+=pctRow('　有費 %', x=>x.paid, rev.mix.paid);
+
+  h+='<tr class="section"><td class="lbl">成本 / 毛利</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
+  h+=sumRow('營業成本', x=>x.cost, d.cost);
+  h+=sumRow('毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
+  h+=pctRow('毛利率 %', x=>x.total-x.cost, d.gross_margin);
+
+  h+='<tr class="section"><td class="lbl">產能</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
+  h+=sumRow('工作天數', x=>x.workdays, d.workdays.total);
+  h+=sumRow('進廠台數', x=>x.units, d.units?d.units.total:null);
+  h+=sumRow('整體單車產值', x=>x.per_car_overall, d.per_car?d.per_car.overall:null);
+
+  h+='</tbody>';
+  document.getElementById('tbl').innerHTML=h;
+}
+
+function exportCsv(){
+  if(!_data) return;
+  const d=_data, ms=d.months, pm=d.per_month, rev=d.revenue;
+  const head=['項目',...ms.map(m=>MN[m-1]),'合計/平均'];
+  const lines=[head.join(',')];
+  const row=(label,pick,total)=>lines.push([label,...ms.map(m=>val(pick(pm[m])) ),val(total)].join(','));
+  function val(v){ return v==null?'':Math.round(v); }
+  row('總營收',x=>x.total,rev.total);
+  row('有費營收',x=>x.paid,rev.paid);
+  row('一般',x=>x.general,rev.general);
+  row('鈑烤',x=>x.bodywork,rev.bodywork);
+  row('延保',x=>x.extended,rev.extended);
+  row('保固其他',x=>x.total-(x.paid||0),rev.warranty_other);
+  lines.push(['一般占比%',...ms.map(m=>pm[m].total>0?Math.round(pm[m].general/pm[m].total*1000)/10:''),rev.mix.general??''].join(','));
+  lines.push(['鈑烤占比%',...ms.map(m=>pm[m].total>0?Math.round(pm[m].bodywork/pm[m].total*1000)/10:''),rev.mix.bodywork??''].join(','));
+  lines.push(['延保占比%',...ms.map(m=>pm[m].total>0?Math.round(pm[m].extended/pm[m].total*1000)/10:''),rev.mix.extended??''].join(','));
+  lines.push(['保固其他占比%',...ms.map(m=>pm[m].total>0?Math.round((pm[m].total-(pm[m].paid||0))/pm[m].total*1000)/10:''),rev.mix.warranty_other??''].join(','));
+  lines.push(['有費占比%',...ms.map(m=>pm[m].total>0?Math.round(pm[m].paid/pm[m].total*1000)/10:''),rev.mix.paid??''].join(','));
+  row('營業成本',x=>x.cost,d.cost);
+  row('毛利額',x=>x.total-x.cost,d.gross_profit);
+  lines.push(['毛利率%',...ms.map(m=>pm[m].total>0?Math.round((pm[m].total-pm[m].cost)/pm[m].total*1000)/10:''),d.gross_margin??''].join(','));
+  row('工作天數',x=>x.workdays,d.workdays.total);
+  row('進廠台數',x=>x.units,d.units?d.units.total:null);
+  row('整體單車產值',x=>x.per_car_overall,d.per_car?d.per_car.overall:null);
+  const csv='﻿'+lines.join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`budget_params_${val('yearSel')}_${val('branchSel')}_${d.from}-${d.to}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+}
+
+load();
+</script>
+</body>
+</html>

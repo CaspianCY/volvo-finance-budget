@@ -30,6 +30,18 @@ Volvo 服務廠 **全年損益預算編列 / 推估** 網站（精簡獨立版�
   （`revenue_budget_plan`），**不覆蓋**官方月目標；可載回 / 刪除 / 切換版本。實際月份的**營收**永遠以 DMS 為準。
 - **匯出 CSV**（完整損益表，含 BOM，Excel 直接開）。
 
+### 預算參數（實績反推，頁面 `/budget-params.html`）
+
+把已實現月份（如 2026/1–5）的 DMS 實績反推成編列預算要用的驅動因子：
+
+- **工作天數**：DMS 有日期欄就採該月不重複營業日；否則以月曆「週一~週五」估算（依據顯示於頁面）。
+- **進廠台數**：DMS 有工單／車輛識別欄就採不重複計數（合計 / 日平均 / 月平均）；否則顯示「—」。
+- **單車消費額**：整體單車產值＝總營收÷台數；有費客單價＝有費營收÷台數。
+- **各項營收金額 + 占比**：總營收＝`total_untaxed` 全帳別加總；有費＝一般＋鈑烤＋延保；保固其他＝總營收−有費；占比分母為總營收。
+- **營業成本 / 毛利額 / 毛利率**。
+
+> 台數與工作天數的欄位名稱因 DMS 而異，本服務於執行時自動偵測 `repair_income` 的欄位（查 `information_schema`），用了哪種來源會標在頁面與 API 回應的 `basis`。
+
 ## 資料來源（與 DMS 平台共用同一個 Postgres）
 
 | 表 | 用途 | 本服務 |
@@ -81,6 +93,7 @@ curl -s localhost:3000/db-check | jq      # tables 全 exists 且 has_data:true 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
 | GET | `/api/budget-projection?year=&branch=&method=[&version=]` | 全年預估表（含 `pnl` 損益區塊；帶 version 疊加編列值） |
+| GET | `/api/budget-params?year=&branch=&from=&to=` | 預算參數：從實績反推工作天數/台數/單車消費額/各項營收金額+占比/成本/毛利 |
 | GET | `/api/budget-projection/compare?year=&branch=` | 三種推估法全年合計並列 |
 | GET | `/api/budget-projection/plan?year=&branch=&version=` | 取某版本編列值（含 `cost` / `expense`） |
 | GET | `/api/budget-projection/plan/versions?year=&branch=` | 列出版本 |

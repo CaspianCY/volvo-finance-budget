@@ -19,6 +19,7 @@ const {
   computeProjection, VALID_METHODS, REAL_BRANCHES,
   getPlan, savePlan, listPlanVersions, deletePlan,
 } = require('../lib/budgetProjection');
+const { computeBudgetParams } = require('../lib/budgetParams');
 
 const VALID_BRANCH = new Set([...REAL_BRANCHES, 'ALL']);
 
@@ -50,6 +51,28 @@ router.get('/budget-projection', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[budget-projection GET]', err);
+    res.status(500).json({ error: err.message || '內部錯誤' });
+  }
+});
+
+// ── 預算參數（從 from~to 月實績反推驅動因子）──
+// GET /api/budget-params?year=2026&from=1&to=5&branch=AMA
+//   → 工作天數 / 台數 / 單車消費額 / 各項營收金額+占比 / 成本 / 毛利額 / 毛利率
+router.get('/budget-params', async (req, res) => {
+  try {
+    const year = parseInt(req.query.year);
+    const branch = String(req.query.branch || '').trim().toUpperCase();
+    const from = parseInt(req.query.from || '1');
+    const to = parseInt(req.query.to || '5');
+    if (!year || year < YEAR_MIN || year > YEAR_MAX) return res.status(400).json({ error: `year 為必填且需介於 ${YEAR_MIN}~${YEAR_MAX}` });
+    if (!VALID_BRANCH.has(branch)) return res.status(400).json({ error: 'branch 不在允許清單（AMA/AMC/AMD/AME/ALL）' });
+    if (!(from >= 1 && from <= 12) || !(to >= 1 && to <= 12) || from > to) {
+      return res.status(400).json({ error: 'from / to 需為 1~12 且 from ≤ to' });
+    }
+    const result = await computeBudgetParams(year, from, to, branch);
+    res.json(result);
+  } catch (err) {
+    console.error('[budget-params GET]', err);
     res.status(500).json({ error: err.message || '內部錯誤' });
   }
 });
