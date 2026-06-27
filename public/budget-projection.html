@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📈 全年營收預算編列 — Volvo Finance Budget</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root { --text-dim: #94a3b8; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Microsoft JhengHei", sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .sticky-header { position: sticky; top: 0; z-index: 200; background: #0f172a; box-shadow: 0 4px 24px rgba(0,0,0,.6); }
+  .nav { background: #1e293b; border-bottom: 1px solid #2d3f56; padding: 0 24px; display: flex; align-items: center; overflow-x: auto; }
+  .nav-brand { font-size: 15px; font-weight: 700; color: #fff; padding: 16px 0; margin-right: 24px; white-space: nowrap; }
+  .nav-link { padding: 16px 16px; color: var(--text-dim); font-size: 13px; font-weight: 600; text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .nav-link:hover { color: #e2e8f0; }
+  .nav-link.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+  .container { padding: 14px 20px; max-width: 100%; }
+  .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .toolbar select { background: #1a2332; border: 1px solid #2d3f56; color: #e2e8f0; padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  .toolbar select:focus { outline: none; border-color: #3b82f6; }
+  .seg { display: inline-flex; border: 1px solid #2d3f56; border-radius: 8px; overflow: hidden; }
+  .seg button { background: #1a2332; color: var(--text-dim); border: none; padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer; border-right: 1px solid #2d3f56; }
+  .seg button:last-child { border-right: none; }
+  .seg button.active { background: rgba(59,130,246,.18); color: #60a5fa; }
+  .btn { background: rgba(59,130,246,.15); color: #60a5fa; border: 1px solid rgba(59,130,246,.4);
+    padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .btn:hover { background: rgba(59,130,246,.25); }
+  .btn-amber { background: rgba(245,158,11,.15); color: #fbbf24; border-color: rgba(245,158,11,.4); }
+  .btn-amber:hover { background: rgba(245,158,11,.25); }
+  .btn-red { background: rgba(239,68,68,.15); color: #fca5a5; border-color: rgba(239,68,68,.4); }
+  .btn-red:hover { background: rgba(239,68,68,.25); }
+  .hint { font-size: 12px; color: var(--text-dim); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .card { background: #1a2332; border: 1px solid #2d3f56; border-radius: 10px; padding: 12px 14px; }
+  .card .k { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .card .v { font-size: 22px; font-weight: 900; color: #fff; }
+  .card .sub { font-size: 11px; margin-top: 4px; }
+  .pos { color: #34d399; } .neg { color: #fca5a5; } .dim { color: var(--text-dim); }
+  .grid-wrap { background: #1a2332; border: 1px solid #2d3f56; border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+  .grid-scroll { overflow: auto; }
+  table.pj { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 1100px; }
+  table.pj th, table.pj td { padding: 7px 10px; border-bottom: 1px solid rgba(45,63,86,.4); border-right: 1px solid rgba(45,63,86,.2); text-align: right; white-space: nowrap; }
+  table.pj th { background: #16202e; color: #94a3b8; font-weight: 700; position: sticky; top: 0; z-index: 2; }
+  table.pj td.lbl, table.pj th.lbl { text-align: left; position: sticky; left: 0; background: #1a2332; z-index: 1; font-weight: 700; color: #e2e8f0; }
+  table.pj th.lbl { z-index: 3; background: #16202e; }
+  table.pj tr.total td { background: #14203a; font-weight: 900; color: #fff; border-top: 2px solid #2d3f56; }
+  table.pj tr.total td.lbl { background: #14203a; }
+  .cell-actual { color: #e2e8f0; }
+  .cell-proj { color: #fbbf24; }
+  .cell-plan { color: #34d399; font-weight: 700; }
+  td.editing { background: rgba(52,211,153,.06); padding: 2px 4px; }
+  td.editing input { width: 92px; background: #0f1a2b; border: 1px solid #2d3f56; color: #34d399;
+    padding: 4px 6px; border-radius: 4px; font-size: 12px; text-align: right; font-weight: 700; }
+  td.editing input:focus { outline: none; border-color: #34d399; }
+  td.locked { background: rgba(59,130,246,.05); }
+  th.m-actual { color: #60a5fa; }
+  th.m-proj { color: #fbbf24; }
+  .tag { font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 700; margin-left: 4px; }
+  .tag-a { background: rgba(59,130,246,.15); color: #93c5fd; }
+  .tag-p { background: rgba(245,158,11,.15); color: #fbbf24; }
+  .chart-wrap { background: #1a2332; border: 1px solid #2d3f56; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .legend-row { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); margin: 6px 0 10px; }
+  .legend-row b { color: #e2e8f0; }
+  .err { color: #fca5a5; font-size: 13px; padding: 10px; }
+</style>
+</head>
+<body>
+<div class="sticky-header">
+  <nav class="nav">
+    <span class="nav-brand">🚗 Volvo 財務預算</span>
+    <a href="/budget-projection.html" class="nav-link active">📈 全年營收預算編列</a>
+  </nav>
+</div>
+
+<div class="container">
+  <div class="toolbar">
+    <h2 style="font-size:17px;font-weight:900;color:#fff">📈 全年營收預估</h2>
+    <select id="yearSel" onchange="loadProjection()"></select>
+    <select id="branchSel" onchange="loadProjection()">
+      <option value="AMA">AMA</option>
+      <option value="AMC">AMC</option>
+      <option value="AMD">AMD</option>
+      <option value="AME">AME</option>
+      <option value="ALL">四廠合計</option>
+    </select>
+    <div class="seg" id="methodSeg">
+      <button data-m="target" class="active" onclick="setMethod('target')">今年度目標</button>
+      <button data-m="average" onclick="setMethod('average')">1~N月平均</button>
+      <button data-m="conservative" onclick="setMethod('conservative')">保守(取低)</button>
+    </div>
+    <span class="hint" id="methodHint"></span>
+  </div>
+
+  <div class="toolbar" style="margin-bottom:14px">
+    <span class="hint" style="font-weight:700;color:#cbd5e1">📝 預算編列：</span>
+    <select id="versionSel" onchange="onVersionChange()" title="預算版本">
+      <option value="">（不載入版本 / 純推估）</option>
+    </select>
+    <button class="btn" id="editBtn" onclick="toggleEditMode()">✏️ 進入編列</button>
+    <button class="btn" id="applyBtn" onclick="applyProjectionToEdits()" style="display:none" title="用目前推估法的數字填入可編輯月份當作起點">↧ 套用推估值</button>
+    <input id="versionInp" placeholder="版本名稱(如 2026核定版)" style="display:none;background:#1a2332;border:1px solid #2d3f56;color:#e2e8f0;padding:6px 10px;border-radius:6px;font-size:13px;width:170px">
+    <button class="btn" id="saveBtn" onclick="savePlan()" style="display:none">💾 儲存版本</button>
+    <button class="btn btn-red" id="delBtn" onclick="deletePlan()" style="display:none">🗑 刪除版本</button>
+    <button class="btn btn-amber" id="cancelBtn" onclick="cancelEdit()" style="display:none">✕ 取消</button>
+    <button class="btn" onclick="exportCsv()" style="margin-left:auto">⬇️ 匯出 CSV</button>
+  </div>
+
+  <div id="statusBar" class="hint" style="margin-bottom:10px"></div>
+  <div id="errBox" class="err" style="display:none"></div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="chart-wrap">
+    <div class="legend-row">
+      <span>🔵 <b>實際</b>（DMS 已實現月份）</span>
+      <span>🟡 <b>推估</b>（後續月份）</span>
+      <span>🟢 <b>已編列</b>（財務手改）</span>
+      <span>⚪ <b>今年度目標</b>（虛線）</span>
+    </div>
+    <canvas id="chart" height="90"></canvas>
+  </div>
+
+  <div class="grid-wrap">
+    <div class="grid-scroll">
+      <table class="pj" id="tbl"></table>
+    </div>
+  </div>
+
+  <div class="hint" style="margin-bottom:30px;line-height:1.7">
+    <b>推估</b>：已實現月份直接採 DMS 實際營收（repair_income 四大營收口徑）；後續月份依所選方法推估。
+    「今年度目標」採 revenue_targets 月目標；「1~N月平均」用已實現月份平均往後鋪；「保守(取低)」逐項取目標與平均較低者（反映車市不佳、年度目標難達成）。<br>
+    <b>編列</b>：按「✏️ 進入編列」後，後續月份變成可編輯（綠色格），實際月份鎖定。可先「↧ 套用推估值」當起點再微調，輸入版本名稱後「💾 儲存版本」。
+    儲存為<strong>獨立預算版本</strong>，<strong>不會覆蓋</strong>原本的官方月目標（revenue_targets）；之後從版本下拉可載回，已編列的月份會以綠色覆蓋推估值。實際月份永遠以 DMS 為準（不存進版本）。<br>
+    <b>匯出</b>：「⬇️ 匯出 CSV」可下載目前畫面（含編列值）給 Excel。
+  </div>
+</div>
+
+<script>
+let _method = 'target';
+let _chart = null;
+let _data = null;            // 最近一次後端回傳
+let _editMode = false;       // 編列模式
+let _planValues = {};        // { m: {paid,bodywork,general,extended} } 編輯中的覆寫值
+let _version = '';           // 目前載入的版本（空=純推估）
+const CATS = ['paid','bodywork','general','extended'];
+const MONTHS = [1,2,3,4,5,6,7,8,9,10,11,12];
+
+// HTML escape（標籤名稱等插入 innerHTML 前過一層）
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function fmt(v) { return Math.round(v || 0).toLocaleString(); }
+function fmtK(v) { // 以千元顯示，較好讀
+  const n = Math.round((v || 0) / 1000);
+  return n.toLocaleString() + 'K';
+}
+function actualSet() { return new Set((_data && _data.actual_months) || []); }
+
+(function initYears() {
+  const sel = document.getElementById('yearSel');
+  const now = new Date().getFullYear();
+  // 編列預算常需往前幾年做計畫，往後也保留歷史 → 範圍放寬 now+5 ~ now-6
+  for (let y = now + 5; y >= now - 6; y--) {
+    const o = document.createElement('option');
+    o.value = y; o.textContent = y + ' 年';
+    if (y === 2026) o.selected = true;
+    sel.appendChild(o);
+  }
+  if (!sel.value) sel.value = now;
+})();
+
+function curYear()   { return document.getElementById('yearSel').value; }
+function curBranch() { return document.getElementById('branchSel').value; }
+
+function setMethod(m) {
+  if (_editMode) { if (!confirm('切換推估法會離開編列模式，未存的編輯會保留為起點重算。繼續？')) return; }
+  _method = m;
+  document.querySelectorAll('#methodSeg button').forEach(b =>
+    b.classList.toggle('active', b.dataset.m === m));
+  loadProjection();
+}
+
+async function loadProjection() {
+  const year = curYear();
+  const branch = curBranch();
+  const errBox = document.getElementById('errBox');
+  errBox.style.display = 'none';
+  document.getElementById('statusBar').textContent = '⏳ 載入中…';
+  try {
+    let url = `/api/budget-projection?year=${year}&branch=${encodeURIComponent(branch)}&method=${_method}`;
+    if (_version) url += `&version=${encodeURIComponent(_version)}`;
+    const r = await fetch(url);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || '載入失敗');
+    _data = data;
+    if (_editMode) seedPlanFromData();   // 重新載入後以新基準重建編輯值
+    render();
+    loadVersions();
+  } catch (e) {
+    document.getElementById('statusBar').textContent = '';
+    errBox.textContent = '✗ ' + (esc(e.message) || '失敗');
+    errBox.style.display = 'block';
+  }
+}
+
+// 依 _data（+編輯中的 _planValues）算出可顯示的 view（rows + totals）
+function computeView() {
+  const data = _data;
+  const am = actualSet();
+  const rows = {};
+  const totals = { months: {}, actual_ytd: 0, projected_rest: 0, full_year: 0, target_full_year: 0, gap: 0, gap_pct: null };
+  for (const m of MONTHS) totals.months[m] = { value: 0, source: am.has(m) ? 'actual' : 'projected' };
+
+  for (const c of data.categories) {
+    const base = data.rows[c];
+    const row = { label: base.label, months: {}, actual_ytd: 0, projected_rest: 0,
+      full_year: 0, target_full_year: base.target_full_year, gap: 0, gap_pct: null };
+    for (const m of MONTHS) {
+      const isActual = am.has(m);
+      let value, source;
+      if (isActual) { value = base.months[m].value; source = 'actual'; }
+      else if (_editMode) {
+        value = (_planValues[m] && _planValues[m][c] != null) ? Number(_planValues[m][c]) : base.months[m].value;
+        source = 'plan';
+      } else { value = base.months[m].value; source = base.months[m].source; }
+      row.months[m] = { value, source };
+      if (isActual) row.actual_ytd += value; else row.projected_rest += value;
+      row.full_year += value;
+      totals.months[m].value += value;
+    }
+    row.gap = row.full_year - row.target_full_year;
+    row.gap_pct = row.target_full_year ? Math.round(row.full_year / row.target_full_year * 1000) / 10 : null;
+    rows[c] = row;
+    totals.actual_ytd += row.actual_ytd;
+    totals.projected_rest += row.projected_rest;
+    totals.full_year += row.full_year;
+    totals.target_full_year += row.target_full_year;
+  }
+  totals.gap = totals.full_year - totals.target_full_year;
+  totals.gap_pct = totals.target_full_year ? Math.round(totals.full_year / totals.target_full_year * 1000) / 10 : null;
+  return { categories: data.categories, basis: data.basis, actual_months: data.actual_months,
+    projected_months: data.projected_months, method: data.method, rows, totals };
+}
+
+function render() {
+  const data = _data;
+  const am = data.actual_months || [];
+  const pm = data.projected_months || [];
+  const lastActual = am.length ? Math.max(...am) : 0;
+
+  const methodName = { target: '今年度目標', average: `1~${lastActual||'N'}月平均`, conservative: '保守(取低)' }[data.method];
+  let hint = am.length
+    ? `已實現 ${am.join('/')} 月｜後續 ${pm.join('/')} 月用「${methodName}」推估`
+    : '⚠ 此年度該廠尚無 DMS 實際資料，全部月份依推估顯示';
+  if (_version) hint += `｜版本：${_version}`;
+  if (_editMode) hint += '｜✏️ 編列中（綠色格可編輯，實際月份鎖定）';
+  document.getElementById('methodHint').textContent = hint;
+  document.getElementById('statusBar').textContent =
+    `資料口徑：四大營收（有費/鈑烤/一般/延保），單位：元。實際月份=${am.length}，推估月份=${pm.length}`;
+
+  const view = computeView();
+  renderCards(view);
+  renderTable(view);
+  renderChart(view);
+}
+
+// 只重算「合計/小計/卡片/圖」，不動輸入框（避免編輯時失焦）
+function refreshComputed() {
+  const view = computeView();
+  for (const c of view.categories) {
+    const row = view.rows[c];
+    setText(`sum_${c}_ytd`, fmt(row.actual_ytd));
+    setText(`sum_${c}_proj`, fmt(row.projected_rest));
+    setText(`sum_${c}_full`, fmt(row.full_year));
+    setCell(`sum_${c}_gappct`, row.gap_pct != null ? row.gap_pct + '%' : '—', row.gap >= 0 ? 'pos' : 'neg');
+  }
+  for (const m of MONTHS) setText(`tot_m_${m}`, fmt(view.totals.months[m].value));
+  const t = view.totals;
+  setText('tot_ytd', fmt(t.actual_ytd));
+  setText('tot_proj', fmt(t.projected_rest));
+  setText('tot_full', fmt(t.full_year));
+  setText('tot_target', fmt(t.target_full_year));
+  setCell('tot_gappct', t.gap_pct != null ? t.gap_pct + '%' : '—', t.gap >= 0 ? 'pos' : 'neg');
+  renderCards(view);
+  renderChart(view);
+}
+function setText(id, txt) { const el = document.getElementById(id); if (el) el.textContent = txt; }
+function setCell(id, txt, cls) { const el = document.getElementById(id); if (el) { el.textContent = txt; el.className = cls; } }
+
+function renderCards(view) {
+  const t = view.totals;
+  const gapCls = t.gap >= 0 ? 'pos' : 'neg';
+  const gapSign = t.gap >= 0 ? '+' : '';
+  const cards = [
+    { k: '已實現 (YTD)', v: fmt(t.actual_ytd), sub: `<span class="dim">${(view.actual_months||[]).length} 個月實際</span>` },
+    { k: _editMode ? '後續編列' : '後續推估', v: fmt(t.projected_rest), sub: `<span class="dim">${(view.projected_months||[]).length} 個月${_editMode ? '編列' : '推估'}</span>` },
+    { k: '全年預估', v: fmt(t.full_year), sub: `<span class="dim">實際 + ${_editMode ? '編列' : '推估'}</span>` },
+    { k: '今年度目標', v: fmt(t.target_full_year), sub: `<span class="dim">revenue_targets 全年</span>` },
+    { k: '預估 vs 目標', v: `<span class="${gapCls}">${gapSign}${fmt(t.gap)}</span>`,
+      sub: t.gap_pct != null ? `<span class="${gapCls}">達成率 ${t.gap_pct}%</span>` : '<span class="dim">—</span>' },
+  ];
+  document.getElementById('cards').innerHTML = cards.map(c =>
+    `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="sub">${c.sub}</div></div>`
+  ).join('');
+}
+
+function renderTable(view) {
+  const am = new Set(view.actual_months || []);
+  let h = '<thead><tr><th class="lbl">營收項目</th>';
+  for (const m of MONTHS) {
+    const cls = am.has(m) ? 'm-actual' : 'm-proj';
+    const tag = am.has(m) ? '實' : (_editMode ? '編' : '估');
+    h += `<th class="${cls}">${m}月<br><span style="font-size:10px;opacity:.8">${tag}</span></th>`;
+  }
+  h += '<th>已實現</th><th>後續</th><th>全年預估</th><th>年度目標</th><th>達成率</th></tr></thead><tbody>';
+
+  for (const c of view.categories) {
+    const row = view.rows[c];
+    h += `<tr><td class="lbl">${esc(row.label)}</td>`;
+    for (const m of MONTHS) {
+      const cell = row.months[m] || { value: 0, source: 'projected' };
+      if (_editMode && !am.has(m)) {
+        h += `<td class="editing"><input type="number" step="1" id="in_${c}_${m}" value="${Math.round(cell.value)}" ` +
+             `oninput="onEditCell('${c}',${m},this.value)"></td>`;
+      } else {
+        const cls = cell.source === 'actual' ? 'cell-actual locked'
+                  : cell.source === 'plan' ? 'cell-plan' : 'cell-proj';
+        h += `<td class="${cls}">${fmt(cell.value)}</td>`;
+      }
+    }
+    const gapCls = row.gap >= 0 ? 'pos' : 'neg';
+    h += `<td id="sum_${c}_ytd">${fmt(row.actual_ytd)}</td>` +
+         `<td class="cell-proj" id="sum_${c}_proj">${fmt(row.projected_rest)}</td>` +
+         `<td><strong id="sum_${c}_full">${fmt(row.full_year)}</strong></td>` +
+         `<td class="dim">${fmt(row.target_full_year)}</td>` +
+         `<td class="${gapCls}" id="sum_${c}_gappct">${row.gap_pct != null ? row.gap_pct + '%' : '—'}</td></tr>`;
+  }
+
+  const t = view.totals;
+  h += `<tr class="total"><td class="lbl">營收合計</td>`;
+  for (const m of MONTHS) {
+    h += `<td id="tot_m_${m}">${fmt(t.months[m].value)}</td>`;
+  }
+  const gapCls = t.gap >= 0 ? 'pos' : 'neg';
+  h += `<td id="tot_ytd">${fmt(t.actual_ytd)}</td><td id="tot_proj">${fmt(t.projected_rest)}</td>` +
+       `<td id="tot_full">${fmt(t.full_year)}</td><td id="tot_target">${fmt(t.target_full_year)}</td>` +
+       `<td class="${gapCls}" id="tot_gappct">${t.gap_pct != null ? t.gap_pct + '%' : '—'}</td></tr>`;
+  h += '</tbody>';
+  document.getElementById('tbl').innerHTML = h;
+}
+
+function renderChart(view) {
+  const am = new Set(view.actual_months || []);
+  const t = view.totals;
+  const actualBars = [], projBars = [], targetLine = [];
+  for (const m of MONTHS) {
+    const v = (t.months[m] && t.months[m].value) || 0;
+    if (am.has(m)) { actualBars.push(v); projBars.push(null); }
+    else { actualBars.push(null); projBars.push(v); }
+    // 年度目標逐月（從各 category 目標加總）
+    let tgt = 0;
+    for (const c of view.categories) {
+      tgt += (view.basis.target_per_month[m] && view.basis.target_per_month[m][c]) || 0;
+    }
+    targetLine.push(tgt);
+  }
+  const ctx = document.getElementById('chart').getContext('2d');
+  if (_chart) _chart.destroy();
+  _chart = new Chart(ctx, {
+    data: {
+      labels: MONTHS.map(m => m + '月'),
+      datasets: [
+        { type: 'bar', label: '實際', data: actualBars, backgroundColor: 'rgba(59,130,246,.8)', stack: 's' },
+        { type: 'bar', label: '推估', data: projBars, backgroundColor: 'rgba(245,158,11,.8)', stack: 's' },
+        { type: 'line', label: '今年度目標', data: targetLine, borderColor: '#94a3b8',
+          borderDash: [6,4], borderWidth: 2, pointRadius: 2, fill: false, tension: .2 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: true,
+      plugins: {
+        legend: { labels: { color: '#cbd5e1', font: { size: 12 } } },
+        tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmt(c.parsed.y)}` } },
+      },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(45,63,86,.3)' } },
+        y: { ticks: { color: '#94a3b8', callback: v => fmtK(v) }, grid: { color: 'rgba(45,63,86,.3)' } },
+      },
+    },
+  });
+}
+
+// ════════════════════ 編列模式 ════════════════════
+// 以目前 _data 的後續（非實際）月份值作為編輯起點
+function seedPlanFromData() {
+  const am = actualSet();
+  _planValues = {};
+  for (const m of MONTHS) {
+    if (am.has(m)) continue;
+    _planValues[m] = {};
+    for (const c of CATS) _planValues[m][c] = Math.round(_data.rows[c].months[m].value);
+  }
+}
+
+function toggleEditMode() {
+  if (!_data) return;
+  _editMode = !_editMode;
+  if (_editMode) seedPlanFromData();
+  syncEditToolbar();
+  render();
+}
+
+function cancelEdit() {
+  _editMode = false;
+  _planValues = {};
+  syncEditToolbar();
+  render();
+}
+
+function syncEditToolbar() {
+  const on = _editMode;
+  document.getElementById('editBtn').style.display = on ? 'none' : 'inline-block';
+  document.getElementById('applyBtn').style.display = on ? 'inline-block' : 'none';
+  document.getElementById('versionInp').style.display = on ? 'inline-block' : 'none';
+  document.getElementById('saveBtn').style.display = on ? 'inline-block' : 'none';
+  document.getElementById('cancelBtn').style.display = on ? 'inline-block' : 'none';
+  document.getElementById('delBtn').style.display = (_version && !on) ? 'inline-block' : 'none';
+  if (on && _version) document.getElementById('versionInp').value = _version;
+}
+
+// 用目前推估法的數字重新填入可編輯月份（覆蓋手動編輯）
+function applyProjectionToEdits() {
+  if (!confirm('用目前推估法的數字覆蓋所有可編輯月份？已手動改的值會被蓋掉。')) return;
+  const am = actualSet();
+  for (const m of MONTHS) {
+    if (am.has(m)) continue;
+    for (const c of CATS) {
+      const v = Math.round(_data.rows[c].months[m].value);
+      _planValues[m][c] = v;
+      const inp = document.getElementById(`in_${c}_${m}`);
+      if (inp) inp.value = v;
+    }
+  }
+  refreshComputed();
+}
+
+function onEditCell(c, m, val) {
+  if (!_planValues[m]) _planValues[m] = {};
+  const n = parseFloat(val);
+  _planValues[m][c] = isNaN(n) ? 0 : n;
+  refreshComputed();
+}
+
+async function savePlan() {
+  const verRaw = (document.getElementById('versionInp').value || _version || '').trim();
+  if (!verRaw) { alert('請先輸入版本名稱（例如：2026核定版）'); document.getElementById('versionInp').focus(); return; }
+  const am = actualSet();
+  const items = [];
+  for (const m of MONTHS) {
+    if (am.has(m)) continue;   // 實際月份不存（以 DMS 為準）
+    const pv = _planValues[m] || {};
+    items.push({ month: m, paid: pv.paid||0, bodywork: pv.bodywork||0, general: pv.general||0, extended: pv.extended||0 });
+  }
+  try {
+    const r = await fetch('/api/budget-projection/plan', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ year: parseInt(curYear()), branch: curBranch(), version: verRaw, items }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '儲存失敗');
+    _version = verRaw;
+    _editMode = false;
+    _planValues = {};
+    await loadProjection();      // 重新載入（帶 version → 後端把編列值疊上去）
+    // 確保版本下拉選到剛存的版本
+    const sel = document.getElementById('versionSel');
+    if (![...sel.options].some(o => o.value === _version)) {
+      const o = document.createElement('option'); o.value = _version; o.textContent = _version; sel.appendChild(o);
+    }
+    sel.value = _version;
+    syncEditToolbar();
+    flash(`✓ 已儲存版本「${_version}」（${d.written} 個月）`);
+  } catch (e) { alert('✗ ' + (e.message || '儲存失敗')); }
+}
+
+async function deletePlan() {
+  if (!_version) return;
+  if (!confirm(`確定刪除預算版本「${_version}」？此操作不可復原。`)) return;
+  try {
+    const r = await fetch(`/api/budget-projection/plan?year=${curYear()}&branch=${encodeURIComponent(curBranch())}&version=${encodeURIComponent(_version)}`,
+      { method: 'DELETE' });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '刪除失敗');
+    flash(`✓ 已刪除版本「${_version}」`);
+    _version = '';
+    document.getElementById('versionSel').value = '';
+    await loadProjection();
+    syncEditToolbar();
+  } catch (e) { alert('✗ ' + (e.message || '刪除失敗')); }
+}
+
+async function loadVersions() {
+  try {
+    const r = await fetch(`/api/budget-projection/plan/versions?year=${curYear()}&branch=${encodeURIComponent(curBranch())}`);
+    const d = await r.json();
+    if (!r.ok) return;
+    const sel = document.getElementById('versionSel');
+    const cur = _version;
+    sel.innerHTML = '<option value="">（不載入版本 / 純推估）</option>';
+    for (const v of (d.versions || [])) {
+      const o = document.createElement('option');
+      o.value = v.version;
+      o.textContent = `${v.version}（${v.months}月）`;
+      sel.appendChild(o);
+    }
+    sel.value = cur || '';
+  } catch (e) { /* ignore */ }
+}
+
+function onVersionChange() {
+  if (_editMode) { if (!confirm('切換版本會離開目前編列，未存的編輯會遺失。繼續？')) {
+    document.getElementById('versionSel').value = _version; return; } }
+  _editMode = false; _planValues = {};
+  _version = document.getElementById('versionSel').value || '';
+  syncEditToolbar();
+  loadProjection();
+}
+
+// ════════════════════ 匯出 CSV ════════════════════
+function exportCsv() {
+  if (!_data) return;
+  const view = computeView();
+  const head = ['營收項目', ...MONTHS.map(m => m + '月'), '已實現', '後續', '全年預估', '年度目標', '達成率%'];
+  const lines = [head.join(',')];
+  for (const c of view.categories) {
+    const row = view.rows[c];
+    const cells = [row.label,
+      ...MONTHS.map(m => Math.round(row.months[m].value)),
+      Math.round(row.actual_ytd), Math.round(row.projected_rest), Math.round(row.full_year),
+      Math.round(row.target_full_year), row.gap_pct != null ? row.gap_pct : ''];
+    lines.push(cells.join(','));
+  }
+  const t = view.totals;
+  lines.push(['營收合計', ...MONTHS.map(m => Math.round(t.months[m].value)),
+    Math.round(t.actual_ytd), Math.round(t.projected_rest), Math.round(t.full_year),
+    Math.round(t.target_full_year), t.gap_pct != null ? t.gap_pct : ''].join(','));
+  const csv = '﻿' + lines.join('\r\n');   // BOM 讓 Excel 正確讀 UTF-8
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `budget_${curYear()}_${curBranch()}${_version ? '_' + _version : ''}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+function flash(msg) {
+  const bar = document.getElementById('statusBar');
+  const old = bar.textContent;
+  bar.textContent = msg; bar.style.color = '#34d399';
+  setTimeout(() => { bar.style.color = ''; render(); }, 2500);
+}
+
+// 精簡獨立版：無登入，直接載入。
+loadProjection();
+</script>
+</body>
+</html>
