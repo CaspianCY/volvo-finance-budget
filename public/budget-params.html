@@ -83,13 +83,22 @@
     </div>
   </div>
 
+  <h3 id="bdTitle" style="font-size:14px;font-weight:800;color:#cbd5e1;margin:6px 0 8px;display:none">📋 帳類明細（營收 / 料件成本 / 毛利）</h3>
+  <div class="grid-wrap" id="bdWrap" style="display:none">
+    <div class="grid-scroll">
+      <table class="pj" id="bdTbl"></table>
+    </div>
+  </div>
+
   <div class="hint" style="margin-bottom:30px;line-height:1.7">
     <b>用途</b>：把已實現月份（如 2026/1–5）的 DMS 實績反推成編列預算的驅動因子。<br>
     <b>營收口徑</b>：總營收＝<code>repair_income.total_untaxed</code> 全帳別加總；有費營收＝一般＋鈑烤＋延保；保固其他＝總營收−有費。占比分母為總營收。<br>
     <b>工作天數</b>：若 DMS 有日期欄，採該月不重複營業日；否則以月曆「週一~週五」估算（依據列於上方狀態）。<br>
     <b>進廠台數</b>：若 DMS 有工單／車輛識別欄，採不重複計數；否則無法計算（顯示 —）。<br>
     <b>單車消費額</b>：整體單車產值＝總營收÷台數；有費客單價＝有費營收÷台數。<br>
-    <b>毛利</b>：毛利額＝總營收−營業成本（成本＝<code>parts_cost</code>，僅料件）；毛利率＝毛利÷總營收。
+    <b>毛利</b>：毛利額＝總營收−營業成本（成本＝<code>parts_cost</code>，僅料件）；毛利率＝毛利÷總營收。<br>
+    <b>帳類明細</b>：按 DMS <code>account_type</code> 逐筆列出營收／料件成本／毛利（保固、善意、內帳、票券、一般、保險、延保…用真實帳類名稱呈現）。
+    鈑烤拆分：<b>自費鈑烤</b>＝「一般」帳類中有鈑烤(鈑金/烤漆)的部分；<b>保險鈑烤</b>＝「保險」帳類。
   </div>
 </div>
 
@@ -143,6 +152,36 @@ function render(){
 
   renderCards(d);
   renderTable(d);
+  renderBreakdown(d);
+}
+
+// 帳類明細：各 account_type 的 營收 / 料件成本 / 毛利 / 毛利率，並標出自費鈑烤、保險鈑烤
+function renderBreakdown(d){
+  const b=d.breakdown;
+  const title=document.getElementById('bdTitle'), wrap=document.getElementById('bdWrap');
+  if(!b || !b.account_types || !b.account_types.length){ title.style.display='none'; wrap.style.display='none'; return; }
+  title.style.display='block'; wrap.style.display='block';
+  const costHint = b.has_cost ? '' : '（此 DB 無 parts_cost，成本以 0 計）';
+  let h=`<thead><tr><th class="lbl">帳類 account_type</th><th>營收</th><th>料件成本${costHint}</th><th>毛利</th><th>毛利率</th></tr></thead><tbody>`;
+  let tRev=0,tCost=0,tGross=0;
+  for(const t of b.account_types){
+    tRev+=t.rev; tCost+=t.cost; tGross+=t.gross;
+    h+=`<tr><td class="lbl">${esc(t.account_type)}</td><td>${fmt(t.rev)}</td><td>${fmt(t.cost)}</td>`+
+       `<td class="${t.gross>=0?'pos':'neg'}">${fmt(t.gross)}</td><td class="${t.gross_margin>=0?'pos':'neg'}">${pctTxt(t.gross_margin)}</td></tr>`;
+  }
+  h+=`<tr class="bold"><td class="lbl tot">合計</td><td class="tot">${fmt(tRev)}</td><td class="tot">${fmt(tCost)}</td>`+
+     `<td class="tot">${fmt(tGross)}</td><td class="tot">${pctTxt(tRev>0?Math.round(tGross/tRev*1000)/10:null)}</td></tr>`;
+  // 鈑烤拆分（自費 / 保險）
+  if(b.bodywork){
+    const bw=b.bodywork;
+    h+='<tr class="section"><td class="lbl">鈑烤拆分</td><td></td><td></td><td></td><td></td></tr>';
+    const bwRow=(label,rev,cost)=>`<tr><td class="lbl">${label}</td><td>${fmt(rev)}</td><td>${fmt(cost)}</td>`+
+      `<td class="${rev-cost>=0?'pos':'neg'}">${fmt(rev-cost)}</td><td class="dim">${pctTxt(rev>0?Math.round((rev-cost)/rev*1000)/10:null)}</td></tr>`;
+    h+=bwRow('　自費鈑烤（一般帳類中的鈑烤）', bw.self_rev, bw.self_cost);
+    h+=bwRow('　保險鈑烤（保險帳類）', bw.ins_rev, bw.ins_cost);
+  }
+  h+='</tbody>';
+  document.getElementById('bdTbl').innerHTML=h;
 }
 
 function renderCards(d){
@@ -235,6 +274,18 @@ function exportCsv(){
   row('工作天數',x=>x.workdays,d.workdays.total);
   row('進廠台數',x=>x.units,d.units?d.units.total:null);
   row('整體單車產值',x=>x.per_car_overall,d.per_car?d.per_car.overall:null);
+  // 帳類明細
+  const b=d.breakdown;
+  if(b && b.account_types && b.account_types.length){
+    lines.push('');
+    lines.push(['帳類明細','營收','料件成本','毛利','毛利率%'].join(','));
+    for(const t of b.account_types) lines.push([t.account_type,Math.round(t.rev),Math.round(t.cost),Math.round(t.gross),t.gross_margin??''].join(','));
+    if(b.bodywork){
+      const bw=b.bodywork;
+      lines.push(['自費鈑烤(一般帳類)',Math.round(bw.self_rev),Math.round(bw.self_cost),Math.round(bw.self_rev-bw.self_cost),''].join(','));
+      lines.push(['保險鈑烤(保險帳類)',Math.round(bw.ins_rev),Math.round(bw.ins_cost),Math.round(bw.ins_rev-bw.ins_cost),''].join(','));
+    }
+  }
   const csv='﻿'+lines.join('\r\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
