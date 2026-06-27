@@ -111,7 +111,16 @@
       <button data-m="target" class="active" onclick="setMethod('target')">今年度目標</button>
       <button data-m="average" onclick="setMethod('average')">1~N月平均</button>
       <button data-m="conservative" onclick="setMethod('conservative')">保守(取低)</button>
+      <button data-m="workday" onclick="setMethod('workday')">工作天數推估</button>
+      <button data-m="target_pct" onclick="setMethod('target_pct')">目標×%</button>
     </div>
+    <span id="factorBox" style="display:none">
+      <span class="hint">目標 ×</span>
+      <input id="factorInp" type="number" min="0" max="200" step="5" value="85"
+        oninput="onFactorChange(this.value)"
+        style="width:62px;background:#1a2332;border:1px solid #2d3f56;color:#e2e8f0;padding:5px 7px;border-radius:6px;font-size:13px;text-align:right">
+      <span class="hint">%</span>
+    </span>
     <span class="hint" id="methodHint"></span>
   </div>
 
@@ -165,6 +174,7 @@
 
 <script>
 let _method = 'target';
+let _factor = 85;            // 目標係數法的百分比（target_pct）
 let _chart = null;
 let _data = null;            // 最近一次後端回傳
 let _editMode = false;       // 編列模式
@@ -208,7 +218,16 @@ function setMethod(m) {
   _method = m;
   document.querySelectorAll('#methodSeg button').forEach(b =>
     b.classList.toggle('active', b.dataset.m === m));
+  document.getElementById('factorBox').style.display = (m === 'target_pct') ? 'inline-block' : 'none';
   loadProjection();
+}
+
+let _factorTimer = null;
+function onFactorChange(v) {
+  const n = parseFloat(v);
+  if (!isNaN(n)) _factor = Math.max(0, Math.min(200, n));
+  clearTimeout(_factorTimer);
+  _factorTimer = setTimeout(loadProjection, 350);   // 輕量防抖，避免每打一字就打 API
 }
 
 async function loadProjection() {
@@ -219,6 +238,7 @@ async function loadProjection() {
   document.getElementById('statusBar').textContent = '⏳ 載入中…';
   try {
     let url = `/api/budget-projection?year=${year}&branch=${encodeURIComponent(branch)}&method=${_method}`;
+    if (_method === 'target_pct') url += `&factor=${(_factor / 100)}`;
     if (_version) url += `&version=${encodeURIComponent(_version)}`;
     const r = await fetch(url);
     const data = await r.json();
@@ -320,7 +340,8 @@ function render() {
   const pm = data.projected_months || [];
   const lastActual = am.length ? Math.max(...am) : 0;
 
-  const methodName = { target: '今年度目標', average: `1~${lastActual||'N'}月平均`, conservative: '保守(取低)' }[data.method];
+  const methodName = { target: '今年度目標', average: `1~${lastActual||'N'}月平均`, conservative: '保守(取低)',
+    workday: '工作天數推估（日產能×各月工作天數）', target_pct: `目標 × ${Math.round((data.factor||0)*100)}%` }[data.method] || data.method;
   let hint = am.length
     ? `已實現 ${am.join('/')} 月｜後續 ${pm.join('/')} 月用「${methodName}」推估`
     : '⚠ 此年度該廠尚無 DMS 實際資料，全部月份依推估顯示';

@@ -35,6 +35,17 @@ async function init() {
   await pool.query(`ALTER TABLE revenue_budget_plan ADD COLUMN IF NOT EXISTS expense NUMERIC(15,2) DEFAULT 0`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_rev_budget_plan_lookup
     ON revenue_budget_plan(year, branch, version)`);
+
+  // 工作天數（每年每廠每月；財務手動覆寫值，未填則由月曆預設計算）
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS budget_workdays (
+      year   INTEGER     NOT NULL,
+      branch VARCHAR(10) NOT NULL,
+      month  INTEGER     NOT NULL,
+      days   NUMERIC(5,1) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(year, branch, month)
+    )`);
 }
 
 module.exports = init;

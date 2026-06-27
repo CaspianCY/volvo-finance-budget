@@ -73,6 +73,18 @@
   </div>
 
   <div id="basis" class="basis" style="display:none"></div>
+
+  <!-- 工作天數編輯器：每月可手動覆寫（綠＝手動、灰＝月曆預設），存後即影響本頁與全年預估的「工作天數推估法」 -->
+  <div id="wdWrap" style="background:#1a2332;border:1px solid #2d3f56;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:none">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-weight:800;color:#cbd5e1;font-size:13px">🗓 工作天數（每月可手動覆寫）</span>
+      <span class="hint" id="wdHint"></span>
+      <button class="btn" onclick="saveWd()" style="margin-left:auto">💾 儲存工作天數</button>
+      <button class="btn" onclick="resetWd()" style="background:rgba(245,158,11,.15);color:#fbbf24;border-color:rgba(245,158,11,.4)">↺ 還原月曆預設</button>
+    </div>
+    <div id="wdRow" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+  </div>
+
   <div id="errBox" class="err" style="display:none"></div>
 
   <div class="cards" id="cards"></div>
@@ -134,6 +146,53 @@ async function load(){
     document.getElementById('rangeHint').textContent='';
     errBox.textContent='✗ '+esc(e.message); errBox.style.display='block';
   }
+  loadWorkdays();
+}
+
+// ── 工作天數編輯器（全 12 個月）──
+let _wd = null;
+async function loadWorkdays(){
+  try{
+    const r=await fetch(`/api/workdays?year=${val('yearSel')}&branch=${encodeURIComponent(val('branchSel'))}`);
+    const d=await r.json(); if(!r.ok) throw new Error(d.error||'');
+    _wd=d; renderWd();
+  }catch(e){ document.getElementById('wdWrap').style.display='none'; }
+}
+function renderWd(){
+  if(!_wd) return;
+  document.getElementById('wdWrap').style.display='block';
+  let manual=0;
+  let h='';
+  for(let m=1;m<=12;m++){
+    const isManual=_wd.source[m]==='manual'; if(isManual)manual++;
+    const c=isManual?'#34d399':'#64748b';
+    h+=`<span style="display:inline-flex;align-items:center;gap:3px">`+
+       `<span class="hint" style="width:30px;text-align:right">${m}月</span>`+
+       `<input id="wd_${m}" type="number" min="0" max="31" step="0.5" value="${_wd.days[m]}" `+
+       `style="width:54px;background:#0f1a2b;border:1px solid ${c};color:${c};padding:4px 5px;border-radius:4px;font-size:12px;text-align:right;font-weight:700"></span>`;
+  }
+  document.getElementById('wdRow').innerHTML=h;
+  document.getElementById('wdHint').textContent=
+    `綠＝手動、灰＝月曆預設（週一~五，未扣假日）。目前手動覆寫 ${manual} 個月。儲存後 6~12 月的「工作天數推估法」即用此值。`;
+}
+async function saveWd(){
+  const items=[]; for(let m=1;m<=12;m++){ const v=document.getElementById('wd_'+m); if(v) items.push({month:m,days:parseFloat(v.value)||0}); }
+  try{
+    const r=await fetch('/api/workdays',{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({year:parseInt(val('yearSel')),branch:val('branchSel'),items})});
+    const d=await r.json(); if(!r.ok) throw new Error(d.error||'儲存失敗');
+    await loadWorkdays(); await load();
+    document.getElementById('wdHint').textContent='✓ 已儲存工作天數（'+d.written+' 個月）';
+  }catch(e){ alert('✗ '+(e.message||'儲存失敗')); }
+}
+async function resetWd(){
+  if(!confirm('還原全部 12 個月為月曆預設（清除手動覆寫）？')) return;
+  try{
+    for(let m=1;m<=12;m++){
+      await fetch(`/api/workdays?year=${val('yearSel')}&branch=${encodeURIComponent(val('branchSel'))}&month=${m}`,{method:'DELETE'});
+    }
+    await loadWorkdays(); await load();
+  }catch(e){ alert('✗ '+(e.message||'還原失敗')); }
 }
 
 function render(){
@@ -193,6 +252,7 @@ function renderCards(d){
     { k:'營業成本', v:fmt(d.cost), sub:`<span class="dim">parts_cost（僅料件）</span>` },
     { k:'毛利額', v:`<span class="${d.gross_profit>=0?'pos':'neg'}">${fmt(d.gross_profit)}</span>`, sub:`<span class="${gm>=0?'pos':'neg'}">毛利率 ${pctTxt(gm)}</span>` },
     { k:'工作天數（合計）', v:fmt(d.workdays.total), sub:`<span class="dim">月均 ${fmt1(d.workdays.avg_per_month)} 天</span>` },
+    { k:'日產能（總營收/工作天）', v:d.workdays.total>0?fmt(rev.total/d.workdays.total):'—', sub:`<span class="dim">工作天數推估法的基礎</span>` },
     { k:'進廠台數（合計）', v:u?fmt(u.total):'—', sub:u?`<span class="dim">日均 ${fmt1(u.per_day)}｜月均 ${fmt1(u.per_month)}</span>`:`<span class="b-warn" style="color:#fbbf24">無工單欄位</span>` },
     { k:'整體單車產值', v:pc?fmt(pc.overall):'—', sub:pc?`<span class="dim">有費客單價 ${fmt(pc.paid)}</span>`:'<span class="dim">需台數</span>' },
   ];

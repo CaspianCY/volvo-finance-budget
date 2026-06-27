@@ -17,10 +17,12 @@ Volvo 服務廠 **全年損益預算編列 / 推估** 網站（精簡獨立版�
 ## 功能
 
 - **四大營收**（有費 / 鈑烤 / 一般 / 延保）逐月 × 全年。
-- **營收實際 + 推估**：已實現月份採 DMS 實際（`repair_income`）；後續月份三種推估法
+- **營收實際 + 推估**：已實現月份採 DMS 實際（`repair_income`）；後續月份五種推估法
   - `今年度目標` — `revenue_targets` 月目標
   - `1~N月平均` — 已實現月份平均往後鋪
   - `保守(取低)` — 逐項取目標與平均較低者（反映車市不佳、年度目標難達成）
+  - `工作天數推估` — 日產能（已實現月份Σ營收÷Σ工作天數）× 各月工作天數
+  - `目標×%` — 月目標 × 係數（如 85%，係數可調），反映保守達成率
 - **營業成本**：已實現月份預設帶 DMS 料件成本（`repair_income.parts_cost`，**僅含料件、不含工資／外包等**）；
   後續月份以「成本率 ＝ 已實現月份成本 ÷ 營收」乘該月營收推估。編列模式下**所有月份（含已實現）皆可手動覆寫**，
   方便補列 DMS 沒有的工資／外包成本。
@@ -93,7 +95,10 @@ curl -s localhost:3000/db-check | jq      # tables 全 exists 且 has_data:true 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
 | GET | `/api/budget-projection?year=&branch=&method=[&version=]` | 全年預估表（含 `pnl` 損益區塊；帶 version 疊加編列值） |
-| GET | `/api/budget-params?year=&branch=&from=&to=` | 預算參數：從實績反推工作天數/台數/單車消費額/各項營收金額+占比/成本/毛利 |
+| GET | `/api/budget-params?year=&branch=&from=&to=` | 預算參數：從實績反推工作天數/台數/單車消費額/各項營收金額+占比/成本/毛利/帳類明細 |
+| GET | `/api/workdays?year=&branch=` | 取每月工作天數（手動覆寫優先，否則月曆預設） |
+| PUT | `/api/workdays` | 儲存每月工作天數覆寫（`items:[{month,days}]`） |
+| DELETE | `/api/workdays?year=&branch=&month=` | 還原某月為月曆預設 |
 | GET | `/api/budget-projection/compare?year=&branch=` | 三種推估法全年合計並列 |
 | GET | `/api/budget-projection/plan?year=&branch=&version=` | 取某版本編列值（含 `cost` / `expense`） |
 | GET | `/api/budget-projection/plan/versions?year=&branch=` | 列出版本 |
