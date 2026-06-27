@@ -95,7 +95,7 @@ curl -s localhost:3000/db-check | jq      # tables 全 exists 且 has_data:true 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
 | GET | `/api/budget-projection?year=&branch=&method=[&version=]` | 全年預估表（含 `pnl` 損益區塊；帶 version 疊加編列值） |
-| GET | `/api/budget-params?year=&branch=&from=&to=` | 預算參數：從實績反推工作天數/台數/單車消費額/各項營收金額+占比/成本/毛利/帳類明細 |
+| GET | `/api/budget-params?year=&branch=&from=&to=[&project=workday]` | 預算參數：從實績反推工作天數/台數/單車消費額/各項營收金額+占比/成本/毛利/帳類明細；帶 `project=workday` 時把 to+1~12 月以工作天數推估補成全年 |
 | GET | `/api/workdays?year=&branch=` | 取每月工作天數（手動覆寫優先，否則月曆預設） |
 | PUT | `/api/workdays` | 儲存每月工作天數覆寫（`items:[{month,days}]`） |
 | DELETE | `/api/workdays?year=&branch=&month=` | 還原某月為月曆預設 |

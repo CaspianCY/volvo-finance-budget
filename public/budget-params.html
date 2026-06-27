@@ -69,6 +69,9 @@
     <span class="hint">~</span>
     <select id="toSel" onchange="load()"></select>
     <span class="hint" id="rangeHint"></span>
+    <label class="hint" style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:8px">
+      <input type="checkbox" id="projChk" onchange="load()"> 顯示全年（後續月份工作天數推估）
+    </label>
     <button class="btn" onclick="exportCsv()" style="margin-left:auto">⬇️ 匯出 CSV</button>
   </div>
 
@@ -104,6 +107,7 @@
 
   <div class="hint" style="margin-bottom:30px;line-height:1.7">
     <b>用途</b>：把已實現月份（如 2026/1–5）的 DMS 實績反推成編列預算的驅動因子。<br>
+    <b>顯示全年</b>：勾選後，結束月之後到 12 月用「工作天數推估」補上（黃色「估」欄）——各月總營收＝日產能(實際Σ營收÷Σ工作天數)×該月工作天數；營收結構/占比/成本率/單車產值沿用實際月份，台數＝日均台數×工作天數。<br>
     <b>營收口徑</b>：總營收＝<code>repair_income.total_untaxed</code> 全帳別加總；有費營收＝一般＋鈑烤＋延保；保固其他＝總營收−有費。占比分母為總營收。<br>
     <b>工作天數</b>：若 DMS 有日期欄，採該月不重複營業日；否則以月曆「週一~週五」估算（依據列於上方狀態）。<br>
     <b>進廠台數</b>：若 DMS 有工單／車輛識別欄，採不重複計數；否則無法計算（顯示 —）。<br>
@@ -138,7 +142,8 @@ async function load(){
   if(from>to){ document.getElementById('toSel').value=from; to=from; }
   document.getElementById('rangeHint').textContent='載入中…';
   try{
-    const url=`/api/budget-params?year=${val('yearSel')}&branch=${encodeURIComponent(val('branchSel'))}&from=${from}&to=${to}`;
+    let url=`/api/budget-params?year=${val('yearSel')}&branch=${encodeURIComponent(val('branchSel'))}&from=${from}&to=${to}`;
+    if(document.getElementById('projChk').checked) url+='&project=workday';
     const r=await fetch(url); const d=await r.json();
     if(!r.ok) throw new Error(d.error||'載入失敗');
     _data=d; render();
@@ -197,7 +202,8 @@ async function resetWd(){
 
 function render(){
   const d=_data;
-  document.getElementById('rangeHint').textContent=`${d.year}/${d.from}–${d.to}　${d.branch}`;
+  const projTxt=(d.projected_months&&d.projected_months.length)?`　＋${d.projected_months[0]}~12月工作天數推估`:'';
+  document.getElementById('rangeHint').textContent=`${d.year}/${d.from}–${d.to} 實際${projTxt}　${d.branch}`;
 
   // 依據列
   const b=d.basis||{};
@@ -263,8 +269,10 @@ function renderCards(d){
 // 表：列＝項目，欄＝各月＋合計/平均
 function renderTable(d){
   const ms=d.months, pm=d.per_month, rev=d.revenue;
+  const proj=new Set(d.projected_months||[]);
   let h='<thead><tr><th class="lbl">項目</th>';
-  for(const m of ms) h+=`<th>${MN[m-1]}</th>`;
+  for(const m of ms){ const isP=proj.has(m);
+    h+=`<th${isP?' style="color:#fbbf24"':''}>${MN[m-1]}${isP?'<br><span style="font-size:10px;opacity:.8">估</span>':''}</th>`; }
   h+='<th>合計/平均</th></tr></thead><tbody>';
 
   const sumRow=(label,pick,total,opts={})=>{

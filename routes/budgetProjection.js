@@ -74,7 +74,8 @@ router.get('/budget-params', async (req, res) => {
     if (!(from >= 1 && from <= 12) || !(to >= 1 && to <= 12) || from > to) {
       return res.status(400).json({ error: 'from / to 需為 1~12 且 from ≤ to' });
     }
-    const result = await computeBudgetParams(year, from, to, branch);
+    const project = String(req.query.project || '') === 'workday' ? 'workday' : undefined;
+    const result = await computeBudgetParams(year, from, to, branch, { project });
     res.json(result);
   } catch (err) {
     console.error('[budget-params GET]', err);
