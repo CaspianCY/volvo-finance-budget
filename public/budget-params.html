@@ -98,7 +98,7 @@
     </div>
   </div>
 
-  <h3 id="bdTitle" style="font-size:14px;font-weight:800;color:#cbd5e1;margin:6px 0 8px;display:none">📋 帳類明細（營收 / 料件成本 / 毛利）</h3>
+  <h3 id="bdTitle" style="font-size:14px;font-weight:800;color:#cbd5e1;margin:6px 0 8px;display:none">📋 帳類明細（營收 / 料件成本 / 材料毛利）</h3>
   <div class="grid-wrap" id="bdWrap" style="display:none">
     <div class="grid-scroll">
       <table class="pj" id="bdTbl"></table>
@@ -108,14 +108,14 @@
   <div class="hint" style="margin-bottom:30px;line-height:1.7">
     <b>用途</b>：把已實現月份（如 2026/1–5）的 DMS 實績反推成編列預算的驅動因子。<br>
     <b>顯示全年</b>：勾選後，結束月之後到 12 月用「工作天數推估」補上（黃色「估」欄）——各月總營收＝日產能(實際Σ營收÷Σ工作天數)×該月工作天數；營收結構/占比/成本率/單車產值沿用實際月份，台數＝日均台數×工作天數。<br>
-    <b>有費 / 無費口徑</b>：有費（一般／自費鈑烤／保險鈑烤／延保／票券）採實際營收；<strong>無費（保固／善意／內結／VSA…不收費）以「成本」計入營收</strong>（無費營收＝無費成本、無費毛利＝0）。
-    <strong>總營收 ＝ 有費營收 ＋ 無費成本</strong>；占比分母為此總營收；毛利額實質＝有費營收−有費成本。
+    <b>有費 / 無費口徑</b>：有費（一般／自費鈑烤／保險鈑烤／延保／票券）採實際營收；<strong>無費（保固／善意／內結／VSA…不收費）以「成本」計入營收</strong>（無費營收＝無費成本、無費材料毛利＝0）。
+    <strong>總營收 ＝ 有費營收 ＋ 無費成本</strong>；占比分母為此總營收；材料毛利額實質＝有費營收−有費成本。
     <small style="color:#64748b">（下方「帳類明細」表為原始 DMS 帳類，營收用 <code>total_untaxed</code> 原值、未套用此調整，供對帳。）</small><br>
     <b>工作天數</b>：若 DMS 有日期欄，採該月不重複營業日；否則以月曆「週一~週五」估算（依據列於上方狀態）。<br>
     <b>進廠台數</b>：若 DMS 有工單／車輛識別欄，採不重複計數；否則無法計算（顯示 —）。<br>
     <b>單車消費額</b>：整體單車產值＝總營收÷台數；有費客單價＝有費營收÷台數。<br>
-    <b>毛利</b>：毛利額＝總營收−營業成本（成本＝<code>parts_cost</code>，僅料件）；毛利率＝毛利÷總營收。<br>
-    <b>帳類明細</b>：按 DMS <code>account_type</code> 逐筆列出營收／料件成本／毛利（保固、善意、內帳、票券、一般、保險、延保…用真實帳類名稱呈現）。
+    <b>材料毛利</b>：材料毛利額＝總營收−營業成本（成本＝<code>parts_cost</code>，<strong>僅料件、未含技工工資／外包</strong>）；材料毛利率＝材料毛利÷總營收。此為材料毛利，非完整毛利。<br>
+    <b>帳類明細</b>：按 DMS <code>account_type</code> 逐筆列出營收／料件成本／材料毛利（保固、善意、內帳、票券、一般、保險、延保…用真實帳類名稱呈現）。
     鈑烤拆分：<b>自費鈑烤</b>＝「一般」帳類中有鈑烤(鈑金/烤漆)的部分；<b>保險鈑烤</b>＝「保險」帳類。
   </div>
 </div>
@@ -222,14 +222,14 @@ function render(){
   renderBreakdown(d);
 }
 
-// 帳類明細：各 account_type 的 營收 / 料件成本 / 毛利 / 毛利率，並標出自費鈑烤、保險鈑烤
+// 帳類明細：各 account_type 的 營收 / 料件成本 / 材料毛利 / 材料毛利率，並標出自費鈑烤、保險鈑烤
 function renderBreakdown(d){
   const b=d.breakdown;
   const title=document.getElementById('bdTitle'), wrap=document.getElementById('bdWrap');
   if(!b || !b.account_types || !b.account_types.length){ title.style.display='none'; wrap.style.display='none'; return; }
   title.style.display='block'; wrap.style.display='block';
   const costHint = b.has_cost ? '' : '（此 DB 無 parts_cost，成本以 0 計）';
-  let h=`<thead><tr><th class="lbl">帳類 account_type</th><th>營收</th><th>料件成本${costHint}</th><th>毛利</th><th>毛利率</th></tr></thead><tbody>`;
+  let h=`<thead><tr><th class="lbl">帳類 account_type</th><th>營收</th><th>料件成本${costHint}</th><th>材料毛利</th><th>材料毛利率</th></tr></thead><tbody>`;
   let tRev=0,tCost=0,tGross=0;
   for(const t of b.account_types){
     tRev+=t.rev; tCost+=t.cost; tGross+=t.gross;
@@ -258,7 +258,7 @@ function renderCards(d){
     { k:'總營收（合計）', v:fmt(rev.total), sub:`<span class="dim">${d.from}–${d.to}月 ${d.months.length} 個月</span>` },
     { k:'有費營收', v:fmt(rev.paid), sub:`<span class="dim">占總營收 ${pctTxt(rev.mix.paid)}</span>` },
     { k:'營業成本', v:fmt(d.cost), sub:`<span class="dim">parts_cost（僅料件）</span>` },
-    { k:'毛利額', v:`<span class="${d.gross_profit>=0?'pos':'neg'}">${fmt(d.gross_profit)}</span>`, sub:`<span class="${gm>=0?'pos':'neg'}">毛利率 ${pctTxt(gm)}</span>` },
+    { k:'材料毛利額', v:`<span class="${d.gross_profit>=0?'pos':'neg'}">${fmt(d.gross_profit)}</span>`, sub:`<span class="${gm>=0?'pos':'neg'}">材料毛利率 ${pctTxt(gm)}</span>` },
     { k:'工作天數（合計）', v:fmt(d.workdays.total), sub:`<span class="dim">月均 ${fmt1(d.workdays.avg_per_month)} 天</span>` },
     { k:'日產能（總營收/工作天）', v:d.workdays.total>0?fmt(rev.total/d.workdays.total):'—', sub:`<span class="dim">工作天數推估法的基礎</span>` },
     { k:'進廠台數（合計）', v:u?fmt(u.total):'—', sub:u?`<span class="dim">日均 ${fmt1(u.per_day)}｜月均 ${fmt1(u.per_month)}</span>`:`<span class="b-warn" style="color:#fbbf24">無工單欄位</span>` },
@@ -353,12 +353,12 @@ function renderTable(d){
     for(const c of freeCats) h+=detRow('　'+c.label, c.key, 'cost', det.totals[c.key].cost);
     h+=grpRow('　無費成本 小計', grp.free, 'cost', {cls:'bold'});
 
-    // ── 毛利 ──
-    h+=section('毛利');
-    h+=sumRow('毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
-    h+=pctRow('毛利率 %', x=>x.total-x.cost, d.gross_margin);
-    h+=grpMarginRow('　有費毛利率 %', grp.paid);
-    h+=grpMarginRow('　無費毛利率 %', grp.free);
+    // ── 材料毛利 ──
+    h+=section('材料毛利');
+    h+=sumRow('材料毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
+    h+=pctRow('材料毛利率 %', x=>x.total-x.cost, d.gross_margin);
+    h+=grpMarginRow('　有費材料毛利率 %', grp.paid);
+    h+=grpMarginRow('　無費材料毛利率 %', grp.free);
   } else {
     // 無 account_type 明細時退回整包列
     h+=section('營收');
@@ -373,10 +373,10 @@ function renderTable(d){
     h+=pctRow('　鈑烤 %', x=>x.bodywork, rev.mix.bodywork);
     h+=pctRow('　延保 %', x=>x.extended, rev.mix.extended);
     h+=pctRow('　保固其他 %', x=>x.total-(x.paid||0), rev.mix.warranty_other);
-    h+=section('成本 / 毛利');
+    h+=section('成本 / 材料毛利');
     h+=sumRow('營業成本', x=>x.cost, d.cost);
-    h+=sumRow('毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
-    h+=pctRow('毛利率 %', x=>x.total-x.cost, d.gross_margin);
+    h+=sumRow('材料毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
+    h+=pctRow('材料毛利率 %', x=>x.total-x.cost, d.gross_margin);
   }
 
   h+='<tr class="section"><td class="lbl">產能</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
@@ -416,8 +416,8 @@ function exportCsv(){
     for(const c of freeCats) dRow('  '+c.label,c.key,'cost');
     if(grp) gRow('無費成本小計',grp.free,'cost');
     if(grp){
-      lines.push(['有費毛利率%',...ms.map(m=>{const x=grp.paid.per_month[m];return x&&x.rev>0?Math.round((x.rev-x.cost)/x.rev*1000)/10:'';}),grp.paid.margin??''].join(','));
-      lines.push(['無費毛利率%',...ms.map(m=>{const x=grp.free.per_month[m];return x&&x.rev>0?Math.round((x.rev-x.cost)/x.rev*1000)/10:'';}),grp.free.margin??''].join(','));
+      lines.push(['有費材料毛利率%',...ms.map(m=>{const x=grp.paid.per_month[m];return x&&x.rev>0?Math.round((x.rev-x.cost)/x.rev*1000)/10:'';}),grp.paid.margin??''].join(','));
+      lines.push(['無費材料毛利率%',...ms.map(m=>{const x=grp.free.per_month[m];return x&&x.rev>0?Math.round((x.rev-x.cost)/x.rev*1000)/10:'';}),grp.free.margin??''].join(','));
     }
   } else {
     row('有費營收',x=>x.paid,rev.paid);
@@ -427,8 +427,8 @@ function exportCsv(){
     row('保固其他',x=>x.total-(x.paid||0),rev.warranty_other);
     row('營業成本',x=>x.cost,d.cost);
   }
-  row('毛利額',x=>x.total-x.cost,d.gross_profit);
-  lines.push(['毛利率%',...ms.map(m=>pm[m].total>0?Math.round((pm[m].total-pm[m].cost)/pm[m].total*1000)/10:''),d.gross_margin??''].join(','));
+  row('材料毛利額',x=>x.total-x.cost,d.gross_profit);
+  lines.push(['材料毛利率%',...ms.map(m=>pm[m].total>0?Math.round((pm[m].total-pm[m].cost)/pm[m].total*1000)/10:''),d.gross_margin??''].join(','));
   row('工作天數',x=>x.workdays,d.workdays.total);
   row('進廠台數',x=>x.units,d.units?d.units.total:null);
   row('整體單車產值',x=>x.per_car_overall,d.per_car?d.per_car.overall:null);
@@ -436,7 +436,7 @@ function exportCsv(){
   const b=d.breakdown;
   if(b && b.account_types && b.account_types.length){
     lines.push('');
-    lines.push(['帳類明細','營收','料件成本','毛利','毛利率%'].join(','));
+    lines.push(['帳類明細','營收','料件成本','材料毛利','材料毛利率%'].join(','));
     for(const t of b.account_types) lines.push([t.account_type,Math.round(t.rev),Math.round(t.cost),Math.round(t.gross),t.gross_margin??''].join(','));
     if(b.bodywork){
       const bw=b.bodywork;

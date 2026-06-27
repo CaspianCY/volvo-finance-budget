@@ -161,7 +161,8 @@
   </div>
 
   <div class="hint" style="margin-bottom:30px;line-height:1.7">
-    <b>損益結構</b>：營收（四大營收）− 營業成本 = 毛利；毛利 − 營業費用 = 營業淨利。毛利率／淨利率以營收為分母。<br>
+    <b>損益結構</b>：營收（四大營收）− 營業成本 = 材料毛利；材料毛利 − 營業費用 = 營業淨利。材料毛利率／淨利率以營收為分母。
+    <strong>註：營業成本目前僅含料件成本（parts_cost），未含技工工資／外包，故此為「材料毛利」，非完整毛利；工資等可於營業費用編列。</strong><br>
     <b>營收推估</b>：已實現月份直接採 DMS 實際營收（repair_income 四大營收口徑）；後續月份依所選方法推估。
     「今年度目標」採 revenue_targets 月目標；「1~N月平均」用已實現月份平均往後鋪；「保守(取低)」逐項取目標與平均較低者（反映車市不佳、年度目標難達成）。<br>
     <b>營業成本</b>：已實現月份預設帶 DMS 料件成本（repair_income.parts_cost，<strong>僅含料件、不含工資／外包等</strong>）；後續月份以「成本率＝已實現月份成本÷營收」乘該月營收推估。編列模式下<strong>所有月份（含已實現）皆可手動覆寫</strong>，方便補列 DMS 沒有的工資／外包成本。<br>
@@ -277,15 +278,18 @@ function computeView() {
       row.months[m] = { value, source };
       if (isActual) row.actual_ytd += value; else row.projected_rest += value;
       row.full_year += value;
-      totals.months[m].value += value;
+      // 有費(paid)＝鈑烤＋一般＋延保 是總額本身，合計只加三分項以免重複
+      if (c !== 'paid') totals.months[m].value += value;
     }
     row.gap = row.full_year - row.target_full_year;
     row.gap_pct = row.target_full_year ? Math.round(row.full_year / row.target_full_year * 1000) / 10 : null;
     rows[c] = row;
-    totals.actual_ytd += row.actual_ytd;
-    totals.projected_rest += row.projected_rest;
-    totals.full_year += row.full_year;
-    totals.target_full_year += row.target_full_year;
+    if (c !== 'paid') {
+      totals.actual_ytd += row.actual_ytd;
+      totals.projected_rest += row.projected_rest;
+      totals.full_year += row.full_year;
+      totals.target_full_year += row.target_full_year;
+    }
   }
   totals.gap = totals.full_year - totals.target_full_year;
   totals.gap_pct = totals.target_full_year ? Math.round(totals.full_year / totals.target_full_year * 1000) / 10 : null;
@@ -293,7 +297,7 @@ function computeView() {
     projected_months: data.projected_months, method: data.method, rows, totals };
 }
 
-// 由 view（含營收編輯覆寫）＋ 成本/費用編列值，算出損益（毛利/淨利）。
+// 由 view（含營收編輯覆寫）＋ 成本/費用編列值，算出損益（材料毛利/淨利）。
 // 成本／費用：編列模式取 _planValues[m]（成本與費用皆所有月份可編列）；非編列模式
 //   用後端 pnl 的值（已含載入版本的編列值，成本無編列時：已實現月份=DMS、後續=營收×成本率）。
 function computePnl(view) {
@@ -350,7 +354,7 @@ function render() {
   document.getElementById('methodHint').textContent = hint;
   const cr = _data.basis && _data.basis.cost_ratio != null ? (Math.round(_data.basis.cost_ratio * 1000) / 10) : null;
   document.getElementById('statusBar').textContent =
-    `損益口徑：營收（四大營收）− 營業成本 = 毛利 − 營業費用 = 營業淨利，單位：元。` +
+    `損益口徑：營收（四大營收）− 營業成本 = 材料毛利 − 營業費用 = 營業淨利，單位：元。` +
     `成本率(已實現)=${cr != null ? cr + '%' : '—'}｜實際月份=${am.length}，推估月份=${pm.length}`;
 
   const view = computeView();
@@ -413,8 +417,8 @@ function renderCards(view) {
   const cards = [
     { k: '全年營收', v: fmt(t.full_year), sub: `<span class="dim">實際 + ${_editMode ? '編列' : '推估'}</span>` },
     { k: '全年營業成本', v: fmt(p.cost.full_year), sub: `<span class="dim">成本率 ${p.cost_ratio != null ? (Math.round(p.cost_ratio*1000)/10) + '%' : '—'}</span>` },
-    { k: '全年毛利', v: `<span class="${grossCls}">${fmt(p.gross.full_year)}</span>`,
-      sub: p.gross_margin != null ? `<span class="${grossCls}">毛利率 ${p.gross_margin}%</span>` : '<span class="dim">—</span>' },
+    { k: '全年材料毛利', v: `<span class="${grossCls}">${fmt(p.gross.full_year)}</span>`,
+      sub: p.gross_margin != null ? `<span class="${grossCls}">材料毛利率 ${p.gross_margin}%</span>` : '<span class="dim">—</span>' },
     { k: '全年營業費用', v: fmt(p.expense.full_year), sub: `<span class="dim">財務編列</span>` },
     { k: '全年營業淨利', v: `<span class="${netCls}">${fmt(p.net.full_year)}</span>`,
       sub: p.net_margin != null ? `<span class="${netCls}">淨利率 ${p.net_margin}%</span>` : '<span class="dim">—</span>' },
@@ -436,7 +440,8 @@ function renderTable(view) {
   }
   h += '<th>已實現</th><th>後續</th><th>全年預估</th><th>年度目標</th><th>達成率</th></tr></thead><tbody>';
 
-  for (const c of view.categories) {
+  // 有費(paid)＝鈑烤＋一般＋延保 是總額，等同下方「營收合計」，不另列為一行（避免重複與空編輯）
+  for (const c of view.categories.filter(c => c !== 'paid')) {
     const row = view.rows[c];
     h += `<tr><td class="lbl">${esc(row.label)}</td>`;
     for (const m of MONTHS) {
@@ -459,7 +464,7 @@ function renderTable(view) {
   }
 
   const t = view.totals;
-  h += `<tr class="total"><td class="lbl">營收合計</td>`;
+  h += `<tr class="total"><td class="lbl">營收合計（有費）</td>`;
   for (const m of MONTHS) {
     h += `<td id="tot_m_${m}">${fmt(t.months[m].value)}</td>`;
   }
@@ -468,7 +473,7 @@ function renderTable(view) {
        `<td id="tot_full">${fmt(t.full_year)}</td><td id="tot_target">${fmt(t.target_full_year)}</td>` +
        `<td class="${gapCls}" id="tot_gappct">${t.gap_pct != null ? t.gap_pct + '%' : '—'}</td></tr>`;
 
-  // ── 損益區（營業成本 / 毛利 / 毛利率 / 營業費用 / 營業淨利 / 淨利率）──
+  // ── 損益區（營業成本 / 材料毛利 / 材料毛利率 / 營業費用 / 營業淨利 / 淨利率）──
   const p = computePnl(view);
   const dash3 = '<td class="dim">—</td><td class="dim">—</td>'; // 年度目標 + 達成率 兩欄佔位
   const signCls = v => (v >= 0 ? 'pos' : 'neg');
@@ -488,14 +493,14 @@ function renderTable(view) {
   h += `<td id="pc_ytd">${fmt(p.cost.actual_ytd)}</td><td class="cell-proj" id="pc_proj">${fmt(p.cost.projected_rest)}</td>` +
        `<td><strong id="pc_full">${fmt(p.cost.full_year)}</strong></td>${dash3}</tr>`;
 
-  // 毛利（衍生）
-  h += `<tr><td class="lbl">毛利</td>`;
+  // 材料毛利（衍生）
+  h += `<tr><td class="lbl">材料毛利</td>`;
   for (const m of MONTHS) h += `<td class="${signCls(p.months[m].gross)}" id="pg_m_${m}">${fmt(p.months[m].gross)}</td>`;
   h += `<td id="pg_ytd">${fmt(p.gross.actual_ytd)}</td><td id="pg_proj">${fmt(p.gross.projected_rest)}</td>` +
        `<td><strong class="${signCls(p.gross.full_year)}" id="pg_full">${fmt(p.gross.full_year)}</strong></td>${dash3}</tr>`;
 
-  // 毛利率（衍生，全年值放「全年預估」欄）
-  h += `<tr><td class="lbl dim">毛利率</td>`;
+  // 材料毛利率（衍生，全年值放「全年預估」欄）
+  h += `<tr><td class="lbl dim">材料毛利率</td>`;
   for (const m of MONTHS) h += `<td class="dim" id="pgm_m_${m}">${p.months[m].gm != null ? p.months[m].gm + '%' : '—'}</td>`;
   h += `<td class="dim">—</td><td class="dim">—</td>` +
        `<td class="${p.gross_margin >= 0 ? 'pos' : 'neg'}" id="pgm_full">${p.gross_margin != null ? p.gross_margin + '%' : '—'}</td>${dash3}</tr>`;
@@ -543,6 +548,7 @@ function renderChart(view) {
     // 年度目標逐月（從各 category 目標加總）
     let tgt = 0;
     for (const c of view.categories) {
+      if (c === 'paid') continue;   // 有費=分項總和，避免重複
       tgt += (view.basis.target_per_month[m] && view.basis.target_per_month[m][c]) || 0;
     }
     targetLine.push(tgt);
@@ -746,7 +752,7 @@ function exportCsv() {
   const view = computeView();
   const head = ['損益項目', ...MONTHS.map(m => m + '月'), '已實現', '後續', '全年預估', '年度目標', '達成率%'];
   const lines = [head.join(',')];
-  for (const c of view.categories) {
+  for (const c of view.categories.filter(c => c !== 'paid')) {
     const row = view.rows[c];
     const cells = [row.label,
       ...MONTHS.map(m => Math.round(row.months[m].value)),
@@ -755,7 +761,7 @@ function exportCsv() {
     lines.push(cells.join(','));
   }
   const t = view.totals;
-  lines.push(['營收合計', ...MONTHS.map(m => Math.round(t.months[m].value)),
+  lines.push(['營收合計(有費)', ...MONTHS.map(m => Math.round(t.months[m].value)),
     Math.round(t.actual_ytd), Math.round(t.projected_rest), Math.round(t.full_year),
     Math.round(t.target_full_year), t.gap_pct != null ? t.gap_pct : ''].join(','));
 
@@ -764,8 +770,8 @@ function exportCsv() {
   const moneyRow = (label, line) => [label, ...MONTHS.map(m => Math.round(line.months[m])),
     Math.round(line.actual_ytd), Math.round(line.projected_rest), Math.round(line.full_year), '', ''].join(',');
   lines.push(moneyRow('營業成本', p.cost));
-  lines.push(moneyRow('毛利', p.gross));
-  lines.push(['毛利率%', ...MONTHS.map(m => p.months[m].gm != null ? p.months[m].gm : ''),
+  lines.push(moneyRow('材料毛利', p.gross));
+  lines.push(['材料毛利率%', ...MONTHS.map(m => p.months[m].gm != null ? p.months[m].gm : ''),
     '', '', p.gross_margin != null ? p.gross_margin : '', '', ''].join(','));
   lines.push(moneyRow('營業費用', p.expense));
   lines.push(moneyRow('營業淨利', p.net));
