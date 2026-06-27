@@ -132,9 +132,9 @@
     <b>損益結構</b>：營收（四大營收）− 營業成本 = 毛利；毛利 − 營業費用 = 營業淨利。毛利率／淨利率以營收為分母。<br>
     <b>營收推估</b>：已實現月份直接採 DMS 實際營收（repair_income 四大營收口徑）；後續月份依所選方法推估。
     「今年度目標」採 revenue_targets 月目標；「1~N月平均」用已實現月份平均往後鋪；「保守(取低)」逐項取目標與平均較低者（反映車市不佳、年度目標難達成）。<br>
-    <b>營業成本</b>：已實現月份採 DMS 料件成本（repair_income.parts_cost，<strong>僅含料件、不含工資／外包等</strong>）；後續月份以「成本率＝已實現月份成本÷營收」乘該月營收推估。編列模式下後續月份可手動覆寫。<br>
+    <b>營業成本</b>：已實現月份預設帶 DMS 料件成本（repair_income.parts_cost，<strong>僅含料件、不含工資／外包等</strong>）；後續月份以「成本率＝已實現月份成本÷營收」乘該月營收推估。編列模式下<strong>所有月份（含已實現）皆可手動覆寫</strong>，方便補列 DMS 沒有的工資／外包成本。<br>
     <b>營業費用</b>：DMS 無此資料，<strong>全部由財務於編列模式手動輸入</strong>（每月皆可填，含已實現月份），未填以 0 計。<br>
-    <b>編列</b>：按「✏️ 進入編列」後，後續月份的營收／成本與所有月份的費用變成可編輯（綠色格），實際月份的營收與成本鎖定為 DMS。可先「↧ 套用推估值」當起點再微調，輸入版本名稱後「💾 儲存版本」。
+    <b>編列</b>：按「✏️ 進入編列」後，後續月份的營收、以及所有月份的營業成本與營業費用變成可編輯（綠色格）；實際月份的<strong>營收</strong>鎖定為 DMS。可先「↧ 套用推估值」當起點再微調，輸入版本名稱後「💾 儲存版本」。
     儲存為<strong>獨立預算版本</strong>，<strong>不會覆蓋</strong>原本的官方月目標（revenue_targets）；之後從版本下拉可載回。<br>
     <b>匯出</b>：「⬇️ 匯出 CSV」可下載目前畫面完整損益表（含編列值）給 Excel。
   </div>
@@ -251,13 +251,11 @@ function computeView() {
 }
 
 // 由 view（含營收編輯覆寫）＋ 成本/費用編列值，算出損益（毛利/淨利）。
-// 成本：實際月份用 DMS（basis.cost_actual）；後續月份編列模式取 _planValues[m].cost，
-//       否則用後端 pnl 的成本（已含載入版本的編列值，無則營收×成本率）。
-// 費用：DMS 無，編列模式取 _planValues[m].expense，否則用後端 pnl 的費用。
+// 成本／費用：編列模式取 _planValues[m]（成本與費用皆所有月份可編列）；非編列模式
+//   用後端 pnl 的值（已含載入版本的編列值，成本無編列時：已實現月份=DMS、後續=營收×成本率）。
 function computePnl(view) {
   const am = new Set(view.actual_months || []);
   const basis = _data.basis || {};
-  const costActual = basis.cost_actual || {};
   const costRatio = Number(basis.cost_ratio || 0);
   const srvPnl = _data.pnl || null;
   const L = (full = 0) => ({ months: {}, actual_ytd: 0, projected_rest: 0, full_year: 0 });
@@ -267,8 +265,7 @@ function computePnl(view) {
     const isActual = am.has(m);
     const rev = view.totals.months[m].value;
     let cost, costSource;
-    if (isActual) { cost = Number(costActual[m] || 0); costSource = 'actual'; }
-    else if (_editMode) {
+    if (_editMode) {
       cost = Number((_planValues[m] && _planValues[m].cost) || 0); costSource = 'plan';
     } else {
       cost = Number((srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].value) || 0);
@@ -432,15 +429,15 @@ function renderTable(view) {
   const dash3 = '<td class="dim">—</td><td class="dim">—</td>'; // 年度目標 + 達成率 兩欄佔位
   const signCls = v => (v >= 0 ? 'pos' : 'neg');
 
-  // 營業成本：實際月鎖 DMS；後續月可編列
+  // 營業成本：所有月份皆可編列（已實現月份預設帶 DMS 料件成本，可覆寫補列其他成本）
   h += `<tr style="border-top:2px solid #2d3f56"><td class="lbl">營業成本</td>`;
   for (const m of MONTHS) {
     const cell = p.months[m];
-    if (_editMode && !am.has(m)) {
+    if (_editMode) {
       h += `<td class="editing"><input type="number" step="1" id="in_cost_${m}" value="${Math.round(cell.cost)}" ` +
            `oninput="onEditPnl('cost',${m},this.value)"></td>`;
     } else {
-      const cls = cell.isActual ? 'cell-actual locked' : (cell.costSource === 'plan' ? 'cell-plan' : 'cell-proj');
+      const cls = cell.costSource === 'plan' ? 'cell-plan' : (cell.isActual ? 'cell-actual locked' : 'cell-proj');
       h += `<td class="${cls}" id="pc_m_${m}">${fmt(cell.cost)}</td>`;
     }
   }
@@ -536,8 +533,10 @@ function renderChart(view) {
 }
 
 // ════════════════════ 編列模式 ════════════════════
-// 以目前 _data 的後續（非實際）月份值作為編輯起點
-// 營收四項＋營業成本：僅後續月份（實際月份鎖 DMS）；營業費用：所有月份皆可編列
+// 以目前 _data 的值作為編輯起點。
+// 營收四項：僅後續月份可編（實際月份營收恆採 DMS）。
+// 營業成本：所有月份皆可編（已實現月份預設帶 DMS 料件成本，後續月份帶推估值）。
+// 營業費用：所有月份皆可編（DMS 無來源，預設 0 或已載入版本值）。
 function seedPlanFromData() {
   const am = actualSet();
   const srvPnl = _data.pnl || null;
@@ -546,8 +545,8 @@ function seedPlanFromData() {
     _planValues[m] = {};
     if (!am.has(m)) {
       for (const c of CATS) _planValues[m][c] = Math.round(_data.rows[c].months[m].value);
-      _planValues[m].cost = Math.round((srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].value) || 0);
     }
+    _planValues[m].cost = Math.round((srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].value) || 0);
     _planValues[m].expense = Math.round((srvPnl && srvPnl.expense.months[m] && srvPnl.expense.months[m].value) || 0);
   }
 }
@@ -581,17 +580,19 @@ function syncEditToolbar() {
 // 用目前推估法的數字重新填入可編輯的營收／營業成本月份（覆蓋手動編輯）
 // 營業費用為純手動編列、無推估來源，故不在此覆蓋，保留已輸入值。
 function applyProjectionToEdits() {
-  if (!confirm('用目前推估法的數字覆蓋後續月份的營收與營業成本？已手動改的值會被蓋掉（營業費用不受影響）。')) return;
+  if (!confirm('用目前推估法的數字覆蓋：後續月份營收、所有月份營業成本（已實現月份回填 DMS 料件成本）？已手動改的值會被蓋掉（營業費用不受影響）。')) return;
   const am = actualSet();
   const srvPnl = _data.pnl || null;
   for (const m of MONTHS) {
-    if (am.has(m)) continue;
-    for (const c of CATS) {
-      const v = Math.round(_data.rows[c].months[m].value);
-      _planValues[m][c] = v;
-      const inp = document.getElementById(`in_${c}_${m}`);
-      if (inp) inp.value = v;
+    if (!am.has(m)) {
+      for (const c of CATS) {
+        const v = Math.round(_data.rows[c].months[m].value);
+        _planValues[m][c] = v;
+        const inp = document.getElementById(`in_${c}_${m}`);
+        if (inp) inp.value = v;
+      }
     }
+    // 營業成本所有月份回填：已實現月份＝DMS、後續月份＝推估
     const cv = Math.round((srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].value) || 0);
     _planValues[m].cost = cv;
     const cinp = document.getElementById(`in_cost_${m}`);
@@ -623,8 +624,8 @@ async function savePlan() {
   for (const m of MONTHS) {
     const pv = _planValues[m] || {};
     if (am.has(m)) {
-      // 實際月份：營收／成本以 DMS 為準（存 0、讀取時忽略），僅保留可編列的營業費用
-      items.push({ month: m, paid: 0, bodywork: 0, general: 0, extended: 0, cost: 0, expense: pv.expense||0 });
+      // 實際月份：營收以 DMS 為準（存 0、讀取時忽略）；營業成本與費用皆可編列並保存
+      items.push({ month: m, paid: 0, bodywork: 0, general: 0, extended: 0, cost: pv.cost||0, expense: pv.expense||0 });
     } else {
       items.push({ month: m, paid: pv.paid||0, bodywork: pv.bodywork||0, general: pv.general||0,
         extended: pv.extended||0, cost: pv.cost||0, expense: pv.expense||0 });
