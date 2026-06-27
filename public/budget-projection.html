@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>📈 全年營收預算編列 — Volvo Finance Budget</title>
+<title>📊 全年損益預算編列 — Volvo Finance Budget</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   :root { --text-dim: #94a3b8; }
@@ -69,13 +69,13 @@
 <div class="sticky-header">
   <nav class="nav">
     <span class="nav-brand">🚗 Volvo 財務預算</span>
-    <a href="/budget-projection.html" class="nav-link active">📈 全年營收預算編列</a>
+    <a href="/budget-projection.html" class="nav-link active">📊 全年損益預算編列</a>
   </nav>
 </div>
 
 <div class="container">
   <div class="toolbar">
-    <h2 style="font-size:17px;font-weight:900;color:#fff">📈 全年營收預估</h2>
+    <h2 style="font-size:17px;font-weight:900;color:#fff">📊 全年損益預估</h2>
     <select id="yearSel" onchange="loadProjection()"></select>
     <select id="branchSel" onchange="loadProjection()">
       <option value="AMA">AMA</option>
@@ -117,6 +117,7 @@
       <span>🟡 <b>推估</b>（後續月份）</span>
       <span>🟢 <b>已編列</b>（財務手改）</span>
       <span>⚪ <b>今年度目標</b>（虛線）</span>
+      <span>🟣 <b>營業淨利</b>（折線）</span>
     </div>
     <canvas id="chart" height="90"></canvas>
   </div>
@@ -128,11 +129,14 @@
   </div>
 
   <div class="hint" style="margin-bottom:30px;line-height:1.7">
-    <b>推估</b>：已實現月份直接採 DMS 實際營收（repair_income 四大營收口徑）；後續月份依所選方法推估。
+    <b>損益結構</b>：營收（四大營收）− 營業成本 = 毛利；毛利 − 營業費用 = 營業淨利。毛利率／淨利率以營收為分母。<br>
+    <b>營收推估</b>：已實現月份直接採 DMS 實際營收（repair_income 四大營收口徑）；後續月份依所選方法推估。
     「今年度目標」採 revenue_targets 月目標；「1~N月平均」用已實現月份平均往後鋪；「保守(取低)」逐項取目標與平均較低者（反映車市不佳、年度目標難達成）。<br>
-    <b>編列</b>：按「✏️ 進入編列」後，後續月份變成可編輯（綠色格），實際月份鎖定。可先「↧ 套用推估值」當起點再微調，輸入版本名稱後「💾 儲存版本」。
-    儲存為<strong>獨立預算版本</strong>，<strong>不會覆蓋</strong>原本的官方月目標（revenue_targets）；之後從版本下拉可載回，已編列的月份會以綠色覆蓋推估值。實際月份永遠以 DMS 為準（不存進版本）。<br>
-    <b>匯出</b>：「⬇️ 匯出 CSV」可下載目前畫面（含編列值）給 Excel。
+    <b>營業成本</b>：已實現月份採 DMS 料件成本（repair_income.parts_cost，<strong>僅含料件、不含工資／外包等</strong>）；後續月份以「成本率＝已實現月份成本÷營收」乘該月營收推估。編列模式下後續月份可手動覆寫。<br>
+    <b>營業費用</b>：DMS 無此資料，<strong>全部由財務於編列模式手動輸入</strong>（每月皆可填，含已實現月份），未填以 0 計。<br>
+    <b>編列</b>：按「✏️ 進入編列」後，後續月份的營收／成本與所有月份的費用變成可編輯（綠色格），實際月份的營收與成本鎖定為 DMS。可先「↧ 套用推估值」當起點再微調，輸入版本名稱後「💾 儲存版本」。
+    儲存為<strong>獨立預算版本</strong>，<strong>不會覆蓋</strong>原本的官方月目標（revenue_targets）；之後從版本下拉可載回。<br>
+    <b>匯出</b>：「⬇️ 匯出 CSV」可下載目前畫面完整損益表（含編列值）給 Excel。
   </div>
 </div>
 
@@ -141,7 +145,7 @@ let _method = 'target';
 let _chart = null;
 let _data = null;            // 最近一次後端回傳
 let _editMode = false;       // 編列模式
-let _planValues = {};        // { m: {paid,bodywork,general,extended} } 編輯中的覆寫值
+let _planValues = {};        // { m: {paid,bodywork,general,extended,cost,expense} } 編輯中的覆寫值
 let _version = '';           // 目前載入的版本（空=純推估）
 const CATS = ['paid','bodywork','general','extended'];
 const MONTHS = [1,2,3,4,5,6,7,8,9,10,11,12];
@@ -246,6 +250,50 @@ function computeView() {
     projected_months: data.projected_months, method: data.method, rows, totals };
 }
 
+// 由 view（含營收編輯覆寫）＋ 成本/費用編列值，算出損益（毛利/淨利）。
+// 成本：實際月份用 DMS（basis.cost_actual）；後續月份編列模式取 _planValues[m].cost，
+//       否則用後端 pnl 的成本（已含載入版本的編列值，無則營收×成本率）。
+// 費用：DMS 無，編列模式取 _planValues[m].expense，否則用後端 pnl 的費用。
+function computePnl(view) {
+  const am = new Set(view.actual_months || []);
+  const basis = _data.basis || {};
+  const costActual = basis.cost_actual || {};
+  const costRatio = Number(basis.cost_ratio || 0);
+  const srvPnl = _data.pnl || null;
+  const L = (full = 0) => ({ months: {}, actual_ytd: 0, projected_rest: 0, full_year: 0 });
+  const out = { months: {}, revenue: L(), cost: L(), gross: L(), expense: L(), net: L(),
+    cost_ratio: costRatio, gross_margin: null, net_margin: null };
+  for (const m of MONTHS) {
+    const isActual = am.has(m);
+    const rev = view.totals.months[m].value;
+    let cost, costSource;
+    if (isActual) { cost = Number(costActual[m] || 0); costSource = 'actual'; }
+    else if (_editMode) {
+      cost = Number((_planValues[m] && _planValues[m].cost) || 0); costSource = 'plan';
+    } else {
+      cost = Number((srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].value) || 0);
+      costSource = (srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].source) || 'projected';
+    }
+    let exp, expSource;
+    if (_editMode) { exp = Number((_planValues[m] && _planValues[m].expense) || 0); expSource = 'plan'; }
+    else {
+      exp = Number((srvPnl && srvPnl.expense.months[m] && srvPnl.expense.months[m].value) || 0);
+      expSource = (srvPnl && srvPnl.expense.months[m] && srvPnl.expense.months[m].source) || 'projected';
+    }
+    const gross = rev - cost, net = gross - exp;
+    out.months[m] = { rev, cost, gross, exp, net, isActual, costSource, expSource,
+      gm: rev > 0 ? Math.round(gross / rev * 1000) / 10 : null,
+      nm: rev > 0 ? Math.round(net / rev * 1000) / 10 : null };
+    for (const [k, v] of [['revenue', rev], ['cost', cost], ['gross', gross], ['expense', exp], ['net', net]]) {
+      out[k].months[m] = v; out[k].full_year += v;
+      if (isActual) out[k].actual_ytd += v; else out[k].projected_rest += v;
+    }
+  }
+  out.gross_margin = out.revenue.full_year > 0 ? Math.round(out.gross.full_year / out.revenue.full_year * 1000) / 10 : null;
+  out.net_margin = out.revenue.full_year > 0 ? Math.round(out.net.full_year / out.revenue.full_year * 1000) / 10 : null;
+  return out;
+}
+
 function render() {
   const data = _data;
   const am = data.actual_months || [];
@@ -259,8 +307,10 @@ function render() {
   if (_version) hint += `｜版本：${_version}`;
   if (_editMode) hint += '｜✏️ 編列中（綠色格可編輯，實際月份鎖定）';
   document.getElementById('methodHint').textContent = hint;
+  const cr = _data.basis && _data.basis.cost_ratio != null ? (Math.round(_data.basis.cost_ratio * 1000) / 10) : null;
   document.getElementById('statusBar').textContent =
-    `資料口徑：四大營收（有費/鈑烤/一般/延保），單位：元。實際月份=${am.length}，推估月份=${pm.length}`;
+    `損益口徑：營收（四大營收）− 營業成本 = 毛利 − 營業費用 = 營業淨利，單位：元。` +
+    `成本率(已實現)=${cr != null ? cr + '%' : '—'}｜實際月份=${am.length}，推估月份=${pm.length}`;
 
   const view = computeView();
   renderCards(view);
@@ -285,6 +335,27 @@ function refreshComputed() {
   setText('tot_full', fmt(t.full_year));
   setText('tot_target', fmt(t.target_full_year));
   setCell('tot_gappct', t.gap_pct != null ? t.gap_pct + '%' : '—', t.gap >= 0 ? 'pos' : 'neg');
+
+  // 損益區即時更新（不動 input：成本後續月、費用所有月份為輸入框，故只改文字格與小計）
+  const p = computePnl(view);
+  const sc = v => (v >= 0 ? 'pos' : 'neg');
+  for (const m of MONTHS) {
+    const cell = p.months[m];
+    setText(`pc_m_${m}`, fmt(cell.cost));           // 僅實際月份為文字格
+    setCell(`pg_m_${m}`, fmt(cell.gross), sc(cell.gross));
+    setText(`pgm_m_${m}`, cell.gm != null ? cell.gm + '%' : '—');
+    setCell(`pn_m_${m}`, fmt(cell.net), sc(cell.net));
+    setText(`pnm_m_${m}`, cell.nm != null ? cell.nm + '%' : '—');
+  }
+  setText('pc_ytd', fmt(p.cost.actual_ytd)); setText('pc_proj', fmt(p.cost.projected_rest)); setText('pc_full', fmt(p.cost.full_year));
+  setCell('pg_ytd', fmt(p.gross.actual_ytd), ''); setCell('pg_proj', fmt(p.gross.projected_rest), '');
+  setCell('pg_full', fmt(p.gross.full_year), sc(p.gross.full_year));
+  setCell('pgm_full', p.gross_margin != null ? p.gross_margin + '%' : '—', p.gross_margin >= 0 ? 'pos' : 'neg');
+  setText('pe_ytd', fmt(p.expense.actual_ytd)); setText('pe_proj', fmt(p.expense.projected_rest)); setText('pe_full', fmt(p.expense.full_year));
+  setCell('pn_ytd', fmt(p.net.actual_ytd), ''); setCell('pn_proj', fmt(p.net.projected_rest), '');
+  setCell('pn_full', fmt(p.net.full_year), sc(p.net.full_year));
+  setCell('pnm_full', p.net_margin != null ? p.net_margin + '%' : '—', p.net_margin >= 0 ? 'pos' : 'neg');
+
   renderCards(view);
   renderChart(view);
 }
@@ -293,15 +364,21 @@ function setCell(id, txt, cls) { const el = document.getElementById(id); if (el)
 
 function renderCards(view) {
   const t = view.totals;
+  const p = computePnl(view);
   const gapCls = t.gap >= 0 ? 'pos' : 'neg';
   const gapSign = t.gap >= 0 ? '+' : '';
+  const grossCls = p.gross.full_year >= 0 ? 'pos' : 'neg';
+  const netCls = p.net.full_year >= 0 ? 'pos' : 'neg';
   const cards = [
-    { k: '已實現 (YTD)', v: fmt(t.actual_ytd), sub: `<span class="dim">${(view.actual_months||[]).length} 個月實際</span>` },
-    { k: _editMode ? '後續編列' : '後續推估', v: fmt(t.projected_rest), sub: `<span class="dim">${(view.projected_months||[]).length} 個月${_editMode ? '編列' : '推估'}</span>` },
-    { k: '全年預估', v: fmt(t.full_year), sub: `<span class="dim">實際 + ${_editMode ? '編列' : '推估'}</span>` },
-    { k: '今年度目標', v: fmt(t.target_full_year), sub: `<span class="dim">revenue_targets 全年</span>` },
-    { k: '預估 vs 目標', v: `<span class="${gapCls}">${gapSign}${fmt(t.gap)}</span>`,
-      sub: t.gap_pct != null ? `<span class="${gapCls}">達成率 ${t.gap_pct}%</span>` : '<span class="dim">—</span>' },
+    { k: '全年營收', v: fmt(t.full_year), sub: `<span class="dim">實際 + ${_editMode ? '編列' : '推估'}</span>` },
+    { k: '全年營業成本', v: fmt(p.cost.full_year), sub: `<span class="dim">成本率 ${p.cost_ratio != null ? (Math.round(p.cost_ratio*1000)/10) + '%' : '—'}</span>` },
+    { k: '全年毛利', v: `<span class="${grossCls}">${fmt(p.gross.full_year)}</span>`,
+      sub: p.gross_margin != null ? `<span class="${grossCls}">毛利率 ${p.gross_margin}%</span>` : '<span class="dim">—</span>' },
+    { k: '全年營業費用', v: fmt(p.expense.full_year), sub: `<span class="dim">財務編列</span>` },
+    { k: '全年營業淨利', v: `<span class="${netCls}">${fmt(p.net.full_year)}</span>`,
+      sub: p.net_margin != null ? `<span class="${netCls}">淨利率 ${p.net_margin}%</span>` : '<span class="dim">—</span>' },
+    { k: '今年度營收目標', v: fmt(t.target_full_year),
+      sub: t.gap_pct != null ? `<span class="${gapCls}">達成率 ${t.gap_pct}%（${gapSign}${fmt(t.gap)}）</span>` : '<span class="dim">revenue_targets 全年</span>' },
   ];
   document.getElementById('cards').innerHTML = cards.map(c =>
     `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="sub">${c.sub}</div></div>`
@@ -310,7 +387,7 @@ function renderCards(view) {
 
 function renderTable(view) {
   const am = new Set(view.actual_months || []);
-  let h = '<thead><tr><th class="lbl">營收項目</th>';
+  let h = '<thead><tr><th class="lbl">損益項目</th>';
   for (const m of MONTHS) {
     const cls = am.has(m) ? 'm-actual' : 'm-proj';
     const tag = am.has(m) ? '實' : (_editMode ? '編' : '估');
@@ -349,6 +426,66 @@ function renderTable(view) {
   h += `<td id="tot_ytd">${fmt(t.actual_ytd)}</td><td id="tot_proj">${fmt(t.projected_rest)}</td>` +
        `<td id="tot_full">${fmt(t.full_year)}</td><td id="tot_target">${fmt(t.target_full_year)}</td>` +
        `<td class="${gapCls}" id="tot_gappct">${t.gap_pct != null ? t.gap_pct + '%' : '—'}</td></tr>`;
+
+  // ── 損益區（營業成本 / 毛利 / 毛利率 / 營業費用 / 營業淨利 / 淨利率）──
+  const p = computePnl(view);
+  const dash3 = '<td class="dim">—</td><td class="dim">—</td>'; // 年度目標 + 達成率 兩欄佔位
+  const signCls = v => (v >= 0 ? 'pos' : 'neg');
+
+  // 營業成本：實際月鎖 DMS；後續月可編列
+  h += `<tr style="border-top:2px solid #2d3f56"><td class="lbl">營業成本</td>`;
+  for (const m of MONTHS) {
+    const cell = p.months[m];
+    if (_editMode && !am.has(m)) {
+      h += `<td class="editing"><input type="number" step="1" id="in_cost_${m}" value="${Math.round(cell.cost)}" ` +
+           `oninput="onEditPnl('cost',${m},this.value)"></td>`;
+    } else {
+      const cls = cell.isActual ? 'cell-actual locked' : (cell.costSource === 'plan' ? 'cell-plan' : 'cell-proj');
+      h += `<td class="${cls}" id="pc_m_${m}">${fmt(cell.cost)}</td>`;
+    }
+  }
+  h += `<td id="pc_ytd">${fmt(p.cost.actual_ytd)}</td><td class="cell-proj" id="pc_proj">${fmt(p.cost.projected_rest)}</td>` +
+       `<td><strong id="pc_full">${fmt(p.cost.full_year)}</strong></td>${dash3}</tr>`;
+
+  // 毛利（衍生）
+  h += `<tr><td class="lbl">毛利</td>`;
+  for (const m of MONTHS) h += `<td class="${signCls(p.months[m].gross)}" id="pg_m_${m}">${fmt(p.months[m].gross)}</td>`;
+  h += `<td id="pg_ytd">${fmt(p.gross.actual_ytd)}</td><td id="pg_proj">${fmt(p.gross.projected_rest)}</td>` +
+       `<td><strong class="${signCls(p.gross.full_year)}" id="pg_full">${fmt(p.gross.full_year)}</strong></td>${dash3}</tr>`;
+
+  // 毛利率（衍生，全年值放「全年預估」欄）
+  h += `<tr><td class="lbl dim">毛利率</td>`;
+  for (const m of MONTHS) h += `<td class="dim" id="pgm_m_${m}">${p.months[m].gm != null ? p.months[m].gm + '%' : '—'}</td>`;
+  h += `<td class="dim">—</td><td class="dim">—</td>` +
+       `<td class="${p.gross_margin >= 0 ? 'pos' : 'neg'}" id="pgm_full">${p.gross_margin != null ? p.gross_margin + '%' : '—'}</td>${dash3}</tr>`;
+
+  // 營業費用：DMS 無，所有月份可編列
+  h += `<tr><td class="lbl">營業費用</td>`;
+  for (const m of MONTHS) {
+    const cell = p.months[m];
+    if (_editMode) {
+      h += `<td class="editing"><input type="number" step="1" id="in_expense_${m}" value="${Math.round(cell.exp)}" ` +
+           `oninput="onEditPnl('expense',${m},this.value)"></td>`;
+    } else {
+      const cls = cell.exp ? 'cell-plan' : 'dim';
+      h += `<td class="${cls}" id="pe_m_${m}">${fmt(cell.exp)}</td>`;
+    }
+  }
+  h += `<td id="pe_ytd">${fmt(p.expense.actual_ytd)}</td><td id="pe_proj">${fmt(p.expense.projected_rest)}</td>` +
+       `<td><strong id="pe_full">${fmt(p.expense.full_year)}</strong></td>${dash3}</tr>`;
+
+  // 營業淨利（衍生）
+  h += `<tr class="total"><td class="lbl">營業淨利</td>`;
+  for (const m of MONTHS) h += `<td class="${signCls(p.months[m].net)}" id="pn_m_${m}">${fmt(p.months[m].net)}</td>`;
+  h += `<td id="pn_ytd">${fmt(p.net.actual_ytd)}</td><td id="pn_proj">${fmt(p.net.projected_rest)}</td>` +
+       `<td><strong class="${signCls(p.net.full_year)}" id="pn_full">${fmt(p.net.full_year)}</strong></td>${dash3}</tr>`;
+
+  // 淨利率（衍生）
+  h += `<tr><td class="lbl dim">淨利率</td>`;
+  for (const m of MONTHS) h += `<td class="dim" id="pnm_m_${m}">${p.months[m].nm != null ? p.months[m].nm + '%' : '—'}</td>`;
+  h += `<td class="dim">—</td><td class="dim">—</td>` +
+       `<td class="${p.net_margin >= 0 ? 'pos' : 'neg'}" id="pnm_full">${p.net_margin != null ? p.net_margin + '%' : '—'}</td>${dash3}</tr>`;
+
   h += '</tbody>';
   document.getElementById('tbl').innerHTML = h;
 }
@@ -356,7 +493,8 @@ function renderTable(view) {
 function renderChart(view) {
   const am = new Set(view.actual_months || []);
   const t = view.totals;
-  const actualBars = [], projBars = [], targetLine = [];
+  const p = computePnl(view);
+  const actualBars = [], projBars = [], targetLine = [], netLine = [];
   for (const m of MONTHS) {
     const v = (t.months[m] && t.months[m].value) || 0;
     if (am.has(m)) { actualBars.push(v); projBars.push(null); }
@@ -367,6 +505,7 @@ function renderChart(view) {
       tgt += (view.basis.target_per_month[m] && view.basis.target_per_month[m][c]) || 0;
     }
     targetLine.push(tgt);
+    netLine.push(p.months[m].net);   // 營業淨利逐月
   }
   const ctx = document.getElementById('chart').getContext('2d');
   if (_chart) _chart.destroy();
@@ -374,10 +513,12 @@ function renderChart(view) {
     data: {
       labels: MONTHS.map(m => m + '月'),
       datasets: [
-        { type: 'bar', label: '實際', data: actualBars, backgroundColor: 'rgba(59,130,246,.8)', stack: 's' },
-        { type: 'bar', label: '推估', data: projBars, backgroundColor: 'rgba(245,158,11,.8)', stack: 's' },
+        { type: 'bar', label: '營收-實際', data: actualBars, backgroundColor: 'rgba(59,130,246,.8)', stack: 's' },
+        { type: 'bar', label: '營收-推估', data: projBars, backgroundColor: 'rgba(245,158,11,.8)', stack: 's' },
         { type: 'line', label: '今年度目標', data: targetLine, borderColor: '#94a3b8',
           borderDash: [6,4], borderWidth: 2, pointRadius: 2, fill: false, tension: .2 },
+        { type: 'line', label: '營業淨利', data: netLine, borderColor: '#a78bfa',
+          borderWidth: 2, pointRadius: 2, fill: false, tension: .2 },
       ],
     },
     options: {
@@ -396,13 +537,18 @@ function renderChart(view) {
 
 // ════════════════════ 編列模式 ════════════════════
 // 以目前 _data 的後續（非實際）月份值作為編輯起點
+// 營收四項＋營業成本：僅後續月份（實際月份鎖 DMS）；營業費用：所有月份皆可編列
 function seedPlanFromData() {
   const am = actualSet();
+  const srvPnl = _data.pnl || null;
   _planValues = {};
   for (const m of MONTHS) {
-    if (am.has(m)) continue;
     _planValues[m] = {};
-    for (const c of CATS) _planValues[m][c] = Math.round(_data.rows[c].months[m].value);
+    if (!am.has(m)) {
+      for (const c of CATS) _planValues[m][c] = Math.round(_data.rows[c].months[m].value);
+      _planValues[m].cost = Math.round((srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].value) || 0);
+    }
+    _planValues[m].expense = Math.round((srvPnl && srvPnl.expense.months[m] && srvPnl.expense.months[m].value) || 0);
   }
 }
 
@@ -432,10 +578,12 @@ function syncEditToolbar() {
   if (on && _version) document.getElementById('versionInp').value = _version;
 }
 
-// 用目前推估法的數字重新填入可編輯月份（覆蓋手動編輯）
+// 用目前推估法的數字重新填入可編輯的營收／營業成本月份（覆蓋手動編輯）
+// 營業費用為純手動編列、無推估來源，故不在此覆蓋，保留已輸入值。
 function applyProjectionToEdits() {
-  if (!confirm('用目前推估法的數字覆蓋所有可編輯月份？已手動改的值會被蓋掉。')) return;
+  if (!confirm('用目前推估法的數字覆蓋後續月份的營收與營業成本？已手動改的值會被蓋掉（營業費用不受影響）。')) return;
   const am = actualSet();
+  const srvPnl = _data.pnl || null;
   for (const m of MONTHS) {
     if (am.has(m)) continue;
     for (const c of CATS) {
@@ -444,6 +592,10 @@ function applyProjectionToEdits() {
       const inp = document.getElementById(`in_${c}_${m}`);
       if (inp) inp.value = v;
     }
+    const cv = Math.round((srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].value) || 0);
+    _planValues[m].cost = cv;
+    const cinp = document.getElementById(`in_cost_${m}`);
+    if (cinp) cinp.value = cv;
   }
   refreshComputed();
 }
@@ -455,15 +607,28 @@ function onEditCell(c, m, val) {
   refreshComputed();
 }
 
+// 編列營業成本(cost)／營業費用(expense)
+function onEditPnl(field, m, val) {
+  if (!_planValues[m]) _planValues[m] = {};
+  const n = parseFloat(val);
+  _planValues[m][field] = isNaN(n) ? 0 : n;
+  refreshComputed();
+}
+
 async function savePlan() {
   const verRaw = (document.getElementById('versionInp').value || _version || '').trim();
   if (!verRaw) { alert('請先輸入版本名稱（例如：2026核定版）'); document.getElementById('versionInp').focus(); return; }
   const am = actualSet();
   const items = [];
   for (const m of MONTHS) {
-    if (am.has(m)) continue;   // 實際月份不存（以 DMS 為準）
     const pv = _planValues[m] || {};
-    items.push({ month: m, paid: pv.paid||0, bodywork: pv.bodywork||0, general: pv.general||0, extended: pv.extended||0 });
+    if (am.has(m)) {
+      // 實際月份：營收／成本以 DMS 為準（存 0、讀取時忽略），僅保留可編列的營業費用
+      items.push({ month: m, paid: 0, bodywork: 0, general: 0, extended: 0, cost: 0, expense: pv.expense||0 });
+    } else {
+      items.push({ month: m, paid: pv.paid||0, bodywork: pv.bodywork||0, general: pv.general||0,
+        extended: pv.extended||0, cost: pv.cost||0, expense: pv.expense||0 });
+    }
   }
   try {
     const r = await fetch('/api/budget-projection/plan', {
@@ -534,7 +699,7 @@ function onVersionChange() {
 function exportCsv() {
   if (!_data) return;
   const view = computeView();
-  const head = ['營收項目', ...MONTHS.map(m => m + '月'), '已實現', '後續', '全年預估', '年度目標', '達成率%'];
+  const head = ['損益項目', ...MONTHS.map(m => m + '月'), '已實現', '後續', '全年預估', '年度目標', '達成率%'];
   const lines = [head.join(',')];
   for (const c of view.categories) {
     const row = view.rows[c];
@@ -548,6 +713,20 @@ function exportCsv() {
   lines.push(['營收合計', ...MONTHS.map(m => Math.round(t.months[m].value)),
     Math.round(t.actual_ytd), Math.round(t.projected_rest), Math.round(t.full_year),
     Math.round(t.target_full_year), t.gap_pct != null ? t.gap_pct : ''].join(','));
+
+  // 損益區
+  const p = computePnl(view);
+  const moneyRow = (label, line) => [label, ...MONTHS.map(m => Math.round(line.months[m])),
+    Math.round(line.actual_ytd), Math.round(line.projected_rest), Math.round(line.full_year), '', ''].join(',');
+  lines.push(moneyRow('營業成本', p.cost));
+  lines.push(moneyRow('毛利', p.gross));
+  lines.push(['毛利率%', ...MONTHS.map(m => p.months[m].gm != null ? p.months[m].gm : ''),
+    '', '', p.gross_margin != null ? p.gross_margin : '', '', ''].join(','));
+  lines.push(moneyRow('營業費用', p.expense));
+  lines.push(moneyRow('營業淨利', p.net));
+  lines.push(['淨利率%', ...MONTHS.map(m => p.months[m].nm != null ? p.months[m].nm : ''),
+    '', '', p.net_margin != null ? p.net_margin : '', '', ''].join(','));
+
   const csv = '﻿' + lines.join('\r\n');   // BOM 讓 Excel 正確讀 UTF-8
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
