@@ -316,40 +316,66 @@ function renderTable(d){
     return s;
   };
   const grp = det && det.groups;
+  const section=(label)=>`<tr class="section"><td class="lbl">${label}</td>`+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
+  const subHead=(label)=>`<tr><td class="lbl" style="color:#93c5fd;font-weight:800">${label}</td>`+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
+  const paidCats = det ? det.categories.filter(c=>c.paid) : [];
+  const freeCats = det ? det.categories.filter(c=>!c.paid) : [];
 
-  h+='<tr class="section"><td class="lbl">營收</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
-  h+=sumRow('總營收', x=>x.total, rev.total, {cls:'bold'});
-  if(det){
-    for(const c of det.categories) h+=detRow('　'+c.label, c.key, 'rev', det.totals[c.key].rev);
-    if(grp){ h+=grpRow('　有費營收 小計', grp.paid, 'rev', {cls:'bold'}); h+=grpRow('　無費營收 小計', grp.free, 'rev', {cls:'bold'}); }
+  if(det && grp){
+    // ── 營收（分有費 / 無費兩組，各列成分 + 小計）──
+    h+=section('營收');
+    h+=sumRow('總營收', x=>x.total, rev.total, {cls:'bold'});
+    h+=subHead('〔有費〕成分');
+    for(const c of paidCats) h+=detRow('　'+c.label, c.key, 'rev', det.totals[c.key].rev);
+    h+=grpRow('　有費營收 小計', grp.paid, 'rev', {cls:'bold'});
+    h+=subHead('〔無費〕成分（不收費，重點看成本）');
+    for(const c of freeCats) h+=detRow('　'+c.label, c.key, 'rev', det.totals[c.key].rev);
+    h+=grpRow('　無費營收 小計', grp.free, 'rev', {cls:'bold'});
+
+    // ── 占比（分組）──
+    h+=section('營收占比（÷總營收）');
+    h+=subHead('〔有費〕');
+    for(const c of paidCats) h+=detPctRow('　'+c.label+' %', c.key, det.totals[c.key].mix);
+    h+=`<tr class="bold"><td class="lbl">　有費 合計 %</td>`+ms.map(m=>{const mt=pm[m].total;const x=grp.paid.per_month[m];return `<td>${pctTxt(mt>0?Math.round((x?x.rev:0)/mt*1000)/10:null)}</td>`;}).join('')+`<td class="tot">${pctTxt(grp.paid.mix)}</td></tr>`;
+    h+=subHead('〔無費〕');
+    for(const c of freeCats) h+=detPctRow('　'+c.label+' %', c.key, det.totals[c.key].mix);
+    h+=`<tr class="bold"><td class="lbl">　無費 合計 %</td>`+ms.map(m=>{const mt=pm[m].total;const x=grp.free.per_month[m];return `<td>${pctTxt(mt>0?Math.round((x?x.rev:0)/mt*1000)/10:null)}</td>`;}).join('')+`<td class="tot">${pctTxt(grp.free.mix)}</td></tr>`;
+
+    // ── 料件成本（分組；無費這組是重點）──
+    h+=section('料件成本（分有費 / 無費）');
+    h+=sumRow('營業成本(合計)', x=>x.cost, d.cost, {cls:'bold'});
+    h+=subHead('〔有費〕成本');
+    for(const c of paidCats) h+=detRow('　'+c.label, c.key, 'cost', det.totals[c.key].cost);
+    h+=grpRow('　有費成本 小計', grp.paid, 'cost', {cls:'bold'});
+    h+=subHead('〔無費〕成本 ← 不收費卻發生的成本');
+    for(const c of freeCats) h+=detRow('　'+c.label, c.key, 'cost', det.totals[c.key].cost);
+    h+=grpRow('　無費成本 小計', grp.free, 'cost', {cls:'bold'});
+
+    // ── 毛利 ──
+    h+=section('毛利');
+    h+=sumRow('毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
+    h+=pctRow('毛利率 %', x=>x.total-x.cost, d.gross_margin);
+    h+=grpMarginRow('　有費毛利率 %', grp.paid);
+    h+=grpMarginRow('　無費毛利率 %', grp.free);
   } else {
+    // 無 account_type 明細時退回整包列
+    h+=section('營收');
+    h+=sumRow('總營收', x=>x.total, rev.total, {cls:'bold'});
     h+=sumRow('　有費營收', x=>x.paid, rev.paid);
     h+=sumRow('　一般', x=>x.general, rev.general);
     h+=sumRow('　鈑烤', x=>x.bodywork, rev.bodywork);
     h+=sumRow('　延保', x=>x.extended, rev.extended);
     h+=sumRow('　保固其他', x=>x.total-(x.paid||0), rev.warranty_other);
-  }
-
-  h+='<tr class="section"><td class="lbl">營收占比（÷總營收）</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
-  if(det){
-    for(const c of det.categories) h+=detPctRow('　'+c.label+' %', c.key, det.totals[c.key].mix);
-  } else {
+    h+=section('營收占比（÷總營收）');
     h+=pctRow('　一般 %', x=>x.general, rev.mix.general);
     h+=pctRow('　鈑烤 %', x=>x.bodywork, rev.mix.bodywork);
     h+=pctRow('　延保 %', x=>x.extended, rev.mix.extended);
     h+=pctRow('　保固其他 %', x=>x.total-(x.paid||0), rev.mix.warranty_other);
-    h+=pctRow('　有費 %', x=>x.paid, rev.mix.paid);
+    h+=section('成本 / 毛利');
+    h+=sumRow('營業成本', x=>x.cost, d.cost);
+    h+=sumRow('毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
+    h+=pctRow('毛利率 %', x=>x.total-x.cost, d.gross_margin);
   }
-
-  h+='<tr class="section"><td class="lbl">料件成本</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
-  h+=sumRow('營業成本(合計)', x=>x.cost, d.cost, {cls:'bold'});
-  if(grp){ h+=grpRow('　有費成本 小計', grp.paid, 'cost', {cls:'bold'}); h+=grpRow('　無費成本 小計', grp.free, 'cost', {cls:'bold'}); }
-  if(det){ for(const c of det.categories) h+=detRow('　'+c.label, c.key, 'cost', det.totals[c.key].cost); }
-
-  h+='<tr class="section"><td class="lbl">毛利</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
-  h+=sumRow('毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
-  h+=pctRow('毛利率 %', x=>x.total-x.cost, d.gross_margin);
-  if(grp){ h+=grpMarginRow('　有費毛利率 %', grp.paid); h+=grpMarginRow('　無費毛利率 %', grp.free); }
 
   h+='<tr class="section"><td class="lbl">產能</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
   h+=sumRow('工作天數', x=>x.workdays, d.workdays.total);
@@ -370,14 +396,23 @@ function exportCsv(){
   const det=d.breakdown&&d.breakdown.detail;
   const grp=det&&det.groups;
   const gRow=(label,g,field)=>lines.push([label,...ms.map(m=>{const x=g.per_month[m];return val(x?x[field]:0);}),val(g[field])].join(','));
+  const dRow=(label,key,field)=>lines.push([label,...ms.map(m=>{const x=det.per_month[m]&&det.per_month[m][key];return val(x?x[field]:0);}),val(det.totals[key][field])].join(','));
   row('總營收',x=>x.total,rev.total);
   if(det){
-    for(const c of det.categories) lines.push([c.label,...ms.map(m=>{const x=det.per_month[m]&&det.per_month[m][c.key];return val(x?x.rev:0);}),val(det.totals[c.key].rev)].join(','));
-    if(grp){ gRow('有費營收小計',grp.paid,'rev'); gRow('無費營收小計',grp.free,'rev'); }
-    for(const c of det.categories) lines.push([c.label+'占比%',...ms.map(m=>{const mt=pm[m].total;const x=det.per_month[m]&&det.per_month[m][c.key];return mt>0?Math.round((x?x.rev:0)/mt*1000)/10:'';}),det.totals[c.key].mix??''].join(','));
+    const paidCats=det.categories.filter(c=>c.paid), freeCats=det.categories.filter(c=>!c.paid);
+    lines.push(['〔有費〕營收'].join(','));
+    for(const c of paidCats) dRow('  '+c.label,c.key,'rev');
+    if(grp) gRow('有費營收小計',grp.paid,'rev');
+    lines.push(['〔無費〕營收（重點看成本）'].join(','));
+    for(const c of freeCats) dRow('  '+c.label,c.key,'rev');
+    if(grp) gRow('無費營收小計',grp.free,'rev');
     row('營業成本(合計)',x=>x.cost,d.cost);
-    if(grp){ gRow('有費成本小計',grp.paid,'cost'); gRow('無費成本小計',grp.free,'cost'); }
-    for(const c of det.categories) lines.push([c.label+' 成本',...ms.map(m=>{const x=det.per_month[m]&&det.per_month[m][c.key];return val(x?x.cost:0);}),val(det.totals[c.key].cost)].join(','));
+    lines.push(['〔有費〕成本'].join(','));
+    for(const c of paidCats) dRow('  '+c.label,c.key,'cost');
+    if(grp) gRow('有費成本小計',grp.paid,'cost');
+    lines.push(['〔無費〕成本'].join(','));
+    for(const c of freeCats) dRow('  '+c.label,c.key,'cost');
+    if(grp) gRow('無費成本小計',grp.free,'cost');
     if(grp){
       lines.push(['有費毛利率%',...ms.map(m=>{const x=grp.paid.per_month[m];return x&&x.rev>0?Math.round((x.rev-x.cost)/x.rev*1000)/10:'';}),grp.paid.margin??''].join(','));
       lines.push(['無費毛利率%',...ms.map(m=>{const x=grp.free.per_month[m];return x&&x.rev>0?Math.round((x.rev-x.cost)/x.rev*1000)/10:'';}),grp.free.margin??''].join(','));
