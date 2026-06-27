@@ -280,24 +280,49 @@ function renderTable(d){
     s+=`<td class="tot">${pctTxt(totalPct)}</td></tr>`;
     return s;
   };
+  // 細分類（依帳類）逐月列：一般(不含鈑烤)/自費鈑烤/保險鈑烤/延保/保固/善意/內帳/票券…
+  const det = d.breakdown && d.breakdown.detail;
+  const detRow=(label,key,field,total)=>{
+    let s=`<tr><td class="lbl">${label}</td>`;
+    for(const m of ms){ const c=det.per_month[m]&&det.per_month[m][key]; s+=`<td>${fmt(c?c[field]:0)}</td>`; }
+    s+=`<td class="tot">${fmt(total)}</td></tr>`;
+    return s;
+  };
+  const detPctRow=(label,key,totalPct)=>{
+    let s=`<tr><td class="lbl dim">${label}</td>`;
+    for(const m of ms){ const mt=pm[m].total; const c=det.per_month[m]&&det.per_month[m][key]; const v=mt>0?Math.round((c?c.rev:0)/mt*1000)/10:null; s+=`<td class="dim">${pctTxt(v)}</td>`; }
+    s+=`<td class="tot">${pctTxt(totalPct)}</td></tr>`;
+    return s;
+  };
 
   h+='<tr class="section"><td class="lbl">營收</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
   h+=sumRow('總營收', x=>x.total, rev.total, {cls:'bold'});
-  h+=sumRow('　有費營收', x=>x.paid, rev.paid);
-  h+=sumRow('　一般', x=>x.general, rev.general);
-  h+=sumRow('　鈑烤', x=>x.bodywork, rev.bodywork);
-  h+=sumRow('　延保', x=>x.extended, rev.extended);
-  h+=sumRow('　保固其他', x=>x.total-(x.paid||0), rev.warranty_other);
+  if(det){
+    for(const c of det.categories) h+=detRow('　'+c.label, c.key, 'rev', det.totals[c.key].rev);
+  } else {
+    h+=sumRow('　有費營收', x=>x.paid, rev.paid);
+    h+=sumRow('　一般', x=>x.general, rev.general);
+    h+=sumRow('　鈑烤', x=>x.bodywork, rev.bodywork);
+    h+=sumRow('　延保', x=>x.extended, rev.extended);
+    h+=sumRow('　保固其他', x=>x.total-(x.paid||0), rev.warranty_other);
+  }
 
   h+='<tr class="section"><td class="lbl">營收占比（÷總營收）</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
-  h+=pctRow('　一般 %', x=>x.general, rev.mix.general);
-  h+=pctRow('　鈑烤 %', x=>x.bodywork, rev.mix.bodywork);
-  h+=pctRow('　延保 %', x=>x.extended, rev.mix.extended);
-  h+=pctRow('　保固其他 %', x=>x.total-(x.paid||0), rev.mix.warranty_other);
-  h+=pctRow('　有費 %', x=>x.paid, rev.mix.paid);
+  if(det){
+    for(const c of det.categories) h+=detPctRow('　'+c.label+' %', c.key, det.totals[c.key].mix);
+  } else {
+    h+=pctRow('　一般 %', x=>x.general, rev.mix.general);
+    h+=pctRow('　鈑烤 %', x=>x.bodywork, rev.mix.bodywork);
+    h+=pctRow('　延保 %', x=>x.extended, rev.mix.extended);
+    h+=pctRow('　保固其他 %', x=>x.total-(x.paid||0), rev.mix.warranty_other);
+    h+=pctRow('　有費 %', x=>x.paid, rev.mix.paid);
+  }
 
-  h+='<tr class="section"><td class="lbl">成本 / 毛利</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
-  h+=sumRow('營業成本', x=>x.cost, d.cost);
+  h+='<tr class="section"><td class="lbl">料件成本</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
+  h+=sumRow('營業成本(合計)', x=>x.cost, d.cost, {cls:'bold'});
+  if(det){ for(const c of det.categories) h+=detRow('　'+c.label, c.key, 'cost', det.totals[c.key].cost); }
+
+  h+='<tr class="section"><td class="lbl">毛利</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
   h+=sumRow('毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
   h+=pctRow('毛利率 %', x=>x.total-x.cost, d.gross_margin);
 
@@ -317,18 +342,21 @@ function exportCsv(){
   const lines=[head.join(',')];
   const row=(label,pick,total)=>lines.push([label,...ms.map(m=>val(pick(pm[m])) ),val(total)].join(','));
   function val(v){ return v==null?'':Math.round(v); }
+  const det=d.breakdown&&d.breakdown.detail;
   row('總營收',x=>x.total,rev.total);
-  row('有費營收',x=>x.paid,rev.paid);
-  row('一般',x=>x.general,rev.general);
-  row('鈑烤',x=>x.bodywork,rev.bodywork);
-  row('延保',x=>x.extended,rev.extended);
-  row('保固其他',x=>x.total-(x.paid||0),rev.warranty_other);
-  lines.push(['一般占比%',...ms.map(m=>pm[m].total>0?Math.round(pm[m].general/pm[m].total*1000)/10:''),rev.mix.general??''].join(','));
-  lines.push(['鈑烤占比%',...ms.map(m=>pm[m].total>0?Math.round(pm[m].bodywork/pm[m].total*1000)/10:''),rev.mix.bodywork??''].join(','));
-  lines.push(['延保占比%',...ms.map(m=>pm[m].total>0?Math.round(pm[m].extended/pm[m].total*1000)/10:''),rev.mix.extended??''].join(','));
-  lines.push(['保固其他占比%',...ms.map(m=>pm[m].total>0?Math.round((pm[m].total-(pm[m].paid||0))/pm[m].total*1000)/10:''),rev.mix.warranty_other??''].join(','));
-  lines.push(['有費占比%',...ms.map(m=>pm[m].total>0?Math.round(pm[m].paid/pm[m].total*1000)/10:''),rev.mix.paid??''].join(','));
-  row('營業成本',x=>x.cost,d.cost);
+  if(det){
+    for(const c of det.categories) lines.push([c.label,...ms.map(m=>{const x=det.per_month[m]&&det.per_month[m][c.key];return val(x?x.rev:0);}),val(det.totals[c.key].rev)].join(','));
+    for(const c of det.categories) lines.push([c.label+'占比%',...ms.map(m=>{const mt=pm[m].total;const x=det.per_month[m]&&det.per_month[m][c.key];return mt>0?Math.round((x?x.rev:0)/mt*1000)/10:'';}),det.totals[c.key].mix??''].join(','));
+    row('營業成本(合計)',x=>x.cost,d.cost);
+    for(const c of det.categories) lines.push([c.label+' 成本',...ms.map(m=>{const x=det.per_month[m]&&det.per_month[m][c.key];return val(x?x.cost:0);}),val(det.totals[c.key].cost)].join(','));
+  } else {
+    row('有費營收',x=>x.paid,rev.paid);
+    row('一般',x=>x.general,rev.general);
+    row('鈑烤',x=>x.bodywork,rev.bodywork);
+    row('延保',x=>x.extended,rev.extended);
+    row('保固其他',x=>x.total-(x.paid||0),rev.warranty_other);
+    row('營業成本',x=>x.cost,d.cost);
+  }
   row('毛利額',x=>x.total-x.cost,d.gross_profit);
   lines.push(['毛利率%',...ms.map(m=>pm[m].total>0?Math.round((pm[m].total-pm[m].cost)/pm[m].total*1000)/10:''),d.gross_margin??''].join(','));
   row('工作天數',x=>x.workdays,d.workdays.total);
