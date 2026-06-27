@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>📈 全年營收預算編列 — Volvo Finance Budget</title>
+<title>📊 全年損益預算編列 — Volvo Finance Budget</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   :root { --text-dim: #94a3b8; }
@@ -63,19 +63,42 @@
   .legend-row { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); margin: 6px 0 10px; }
   .legend-row b { color: #e2e8f0; }
   .err { color: #fca5a5; font-size: 13px; padding: 10px; }
+  .dbbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: #1a2332; border: 1px solid #2d3f56; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px; }
+  .dbbar.ok { border-color: rgba(52,211,153,.45); }
+  .dbbar.bad { border-color: rgba(239,68,68,.5); }
+  .dbbar.warn { border-color: rgba(245,158,11,.5); }
+  .db-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+  .db-dot.ok { background: #34d399; box-shadow: 0 0 8px #34d399; }
+  .db-dot.bad { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+  .db-dot.warn { background: #fbbf24; box-shadow: 0 0 8px #fbbf24; }
+  .db-dot.wait { background: #64748b; }
+  .db-title { font-weight: 800; color: #fff; }
+  .db-meta { color: var(--text-dim); }
+  .db-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #2d3f56; background: #16202e; white-space: nowrap; }
+  .db-chip.on { color: #6ee7b7; border-color: rgba(52,211,153,.4); }
+  .db-chip.off { color: #fca5a5; border-color: rgba(239,68,68,.4); }
 </style>
 </head>
 <body>
 <div class="sticky-header">
   <nav class="nav">
     <span class="nav-brand">🚗 Volvo 財務預算</span>
-    <a href="/budget-projection.html" class="nav-link active">📈 全年營收預算編列</a>
+    <a href="/budget-projection.html" class="nav-link active">📊 全年損益預算編列</a>
+    <a href="/budget-params.html" class="nav-link">📐 預算參數（實績反推）</a>
   </nav>
 </div>
 
 <div class="container">
+  <!-- 資料庫連線狀態：一進頁面自動檢查（呼叫 /db-check） -->
+  <div id="dbStatus" class="dbbar">
+    <span class="db-dot wait"></span>
+    <span class="db-title">資料庫連線</span>
+    <span class="db-meta">檢查中…</span>
+  </div>
+
   <div class="toolbar">
-    <h2 style="font-size:17px;font-weight:900;color:#fff">📈 全年營收預估</h2>
+    <h2 style="font-size:17px;font-weight:900;color:#fff">📊 全年損益預估</h2>
     <select id="yearSel" onchange="loadProjection()"></select>
     <select id="branchSel" onchange="loadProjection()">
       <option value="AMA">AMA</option>
@@ -88,7 +111,16 @@
       <button data-m="target" class="active" onclick="setMethod('target')">今年度目標</button>
       <button data-m="average" onclick="setMethod('average')">1~N月平均</button>
       <button data-m="conservative" onclick="setMethod('conservative')">保守(取低)</button>
+      <button data-m="workday" onclick="setMethod('workday')">工作天數推估</button>
+      <button data-m="target_pct" onclick="setMethod('target_pct')">目標×%</button>
     </div>
+    <span id="factorBox" style="display:none">
+      <span class="hint">目標 ×</span>
+      <input id="factorInp" type="number" min="0" max="200" step="5" value="85"
+        oninput="onFactorChange(this.value)"
+        style="width:62px;background:#1a2332;border:1px solid #2d3f56;color:#e2e8f0;padding:5px 7px;border-radius:6px;font-size:13px;text-align:right">
+      <span class="hint">%</span>
+    </span>
     <span class="hint" id="methodHint"></span>
   </div>
 
@@ -117,6 +149,7 @@
       <span>🟡 <b>推估</b>（後續月份）</span>
       <span>🟢 <b>已編列</b>（財務手改）</span>
       <span>⚪ <b>今年度目標</b>（虛線）</span>
+      <span>🟣 <b>營業淨利</b>（折線）</span>
     </div>
     <canvas id="chart" height="90"></canvas>
   </div>
@@ -128,20 +161,25 @@
   </div>
 
   <div class="hint" style="margin-bottom:30px;line-height:1.7">
-    <b>推估</b>：已實現月份直接採 DMS 實際營收（repair_income 四大營收口徑）；後續月份依所選方法推估。
+    <b>損益結構</b>：營收（四大營收）− 營業成本 = 材料毛利；材料毛利 − 營業費用 = 營業淨利。材料毛利率／淨利率以營收為分母。
+    <strong>註：營業成本目前僅含料件成本（parts_cost），未含技工工資／外包，故此為「材料毛利」，非完整毛利；工資等可於營業費用編列。</strong><br>
+    <b>營收推估</b>：已實現月份直接採 DMS 實際營收（repair_income 四大營收口徑）；後續月份依所選方法推估。
     「今年度目標」採 revenue_targets 月目標；「1~N月平均」用已實現月份平均往後鋪；「保守(取低)」逐項取目標與平均較低者（反映車市不佳、年度目標難達成）。<br>
-    <b>編列</b>：按「✏️ 進入編列」後，後續月份變成可編輯（綠色格），實際月份鎖定。可先「↧ 套用推估值」當起點再微調，輸入版本名稱後「💾 儲存版本」。
-    儲存為<strong>獨立預算版本</strong>，<strong>不會覆蓋</strong>原本的官方月目標（revenue_targets）；之後從版本下拉可載回，已編列的月份會以綠色覆蓋推估值。實際月份永遠以 DMS 為準（不存進版本）。<br>
-    <b>匯出</b>：「⬇️ 匯出 CSV」可下載目前畫面（含編列值）給 Excel。
+    <b>營業成本</b>：已實現月份預設帶 DMS 料件成本（repair_income.parts_cost，<strong>僅含料件、不含工資／外包等</strong>）；後續月份以「成本率＝已實現月份成本÷營收」乘該月營收推估。編列模式下<strong>所有月份（含已實現）皆可手動覆寫</strong>，方便補列 DMS 沒有的工資／外包成本。<br>
+    <b>營業費用</b>：DMS 無此資料，<strong>全部由財務於編列模式手動輸入</strong>（每月皆可填，含已實現月份），未填以 0 計。<br>
+    <b>編列</b>：按「✏️ 進入編列」後，後續月份的營收、以及所有月份的營業成本與營業費用變成可編輯（綠色格）；實際月份的<strong>營收</strong>鎖定為 DMS。可先「↧ 套用推估值」當起點再微調，輸入版本名稱後「💾 儲存版本」。
+    儲存為<strong>獨立預算版本</strong>，<strong>不會覆蓋</strong>原本的官方月目標（revenue_targets）；之後從版本下拉可載回。<br>
+    <b>匯出</b>：「⬇️ 匯出 CSV」可下載目前畫面完整損益表（含編列值）給 Excel。
   </div>
 </div>
 
 <script>
 let _method = 'target';
+let _factor = 85;            // 目標係數法的百分比（target_pct）
 let _chart = null;
 let _data = null;            // 最近一次後端回傳
 let _editMode = false;       // 編列模式
-let _planValues = {};        // { m: {paid,bodywork,general,extended} } 編輯中的覆寫值
+let _planValues = {};        // { m: {paid,bodywork,general,extended,cost,expense} } 編輯中的覆寫值
 let _version = '';           // 目前載入的版本（空=純推估）
 const CATS = ['paid','bodywork','general','extended'];
 const MONTHS = [1,2,3,4,5,6,7,8,9,10,11,12];
@@ -181,7 +219,16 @@ function setMethod(m) {
   _method = m;
   document.querySelectorAll('#methodSeg button').forEach(b =>
     b.classList.toggle('active', b.dataset.m === m));
+  document.getElementById('factorBox').style.display = (m === 'target_pct') ? 'inline-block' : 'none';
   loadProjection();
+}
+
+let _factorTimer = null;
+function onFactorChange(v) {
+  const n = parseFloat(v);
+  if (!isNaN(n)) _factor = Math.max(0, Math.min(200, n));
+  clearTimeout(_factorTimer);
+  _factorTimer = setTimeout(loadProjection, 350);   // 輕量防抖，避免每打一字就打 API
 }
 
 async function loadProjection() {
@@ -192,6 +239,7 @@ async function loadProjection() {
   document.getElementById('statusBar').textContent = '⏳ 載入中…';
   try {
     let url = `/api/budget-projection?year=${year}&branch=${encodeURIComponent(branch)}&method=${_method}`;
+    if (_method === 'target_pct') url += `&factor=${(_factor / 100)}`;
     if (_version) url += `&version=${encodeURIComponent(_version)}`;
     const r = await fetch(url);
     const data = await r.json();
@@ -230,20 +278,64 @@ function computeView() {
       row.months[m] = { value, source };
       if (isActual) row.actual_ytd += value; else row.projected_rest += value;
       row.full_year += value;
-      totals.months[m].value += value;
+      // 有費(paid)＝鈑烤＋一般＋延保 是總額本身，合計只加三分項以免重複
+      if (c !== 'paid') totals.months[m].value += value;
     }
     row.gap = row.full_year - row.target_full_year;
     row.gap_pct = row.target_full_year ? Math.round(row.full_year / row.target_full_year * 1000) / 10 : null;
     rows[c] = row;
-    totals.actual_ytd += row.actual_ytd;
-    totals.projected_rest += row.projected_rest;
-    totals.full_year += row.full_year;
-    totals.target_full_year += row.target_full_year;
+    if (c !== 'paid') {
+      totals.actual_ytd += row.actual_ytd;
+      totals.projected_rest += row.projected_rest;
+      totals.full_year += row.full_year;
+      totals.target_full_year += row.target_full_year;
+    }
   }
   totals.gap = totals.full_year - totals.target_full_year;
   totals.gap_pct = totals.target_full_year ? Math.round(totals.full_year / totals.target_full_year * 1000) / 10 : null;
   return { categories: data.categories, basis: data.basis, actual_months: data.actual_months,
     projected_months: data.projected_months, method: data.method, rows, totals };
+}
+
+// 由 view（含營收編輯覆寫）＋ 成本/費用編列值，算出損益（材料毛利/淨利）。
+// 成本／費用：編列模式取 _planValues[m]（成本與費用皆所有月份可編列）；非編列模式
+//   用後端 pnl 的值（已含載入版本的編列值，成本無編列時：已實現月份=DMS、後續=營收×成本率）。
+function computePnl(view) {
+  const am = new Set(view.actual_months || []);
+  const basis = _data.basis || {};
+  const costRatio = Number(basis.cost_ratio || 0);
+  const srvPnl = _data.pnl || null;
+  const L = (full = 0) => ({ months: {}, actual_ytd: 0, projected_rest: 0, full_year: 0 });
+  const out = { months: {}, revenue: L(), cost: L(), gross: L(), expense: L(), net: L(),
+    cost_ratio: costRatio, gross_margin: null, net_margin: null };
+  for (const m of MONTHS) {
+    const isActual = am.has(m);
+    const rev = view.totals.months[m].value;
+    let cost, costSource;
+    if (_editMode) {
+      cost = Number((_planValues[m] && _planValues[m].cost) || 0); costSource = 'plan';
+    } else {
+      cost = Number((srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].value) || 0);
+      costSource = (srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].source) || 'projected';
+    }
+    let exp, expSource;
+    if (_editMode) { exp = Number((_planValues[m] && _planValues[m].expense) || 0); expSource = 'plan'; }
+    else {
+      exp = Number((srvPnl && srvPnl.expense.months[m] && srvPnl.expense.months[m].value) || 0);
+      expSource = (srvPnl && srvPnl.expense.months[m] && srvPnl.expense.months[m].source) || 'projected';
+    }
+    const gross = rev - cost, net = gross - exp;
+    out.months[m] = { rev, cost, gross, exp, net, isActual, costSource, expSource,
+      gm: rev > 0 ? Math.round(gross / rev * 1000) / 10 : null,
+      nm: rev > 0 ? Math.round(net / rev * 1000) / 10 : null };
+    for (const [k, v] of [['revenue', rev], ['cost', cost], ['gross', gross], ['expense', exp], ['net', net]]) {
+      out[k].months[m] = v; out[k].full_year += v;
+      if (isActual) out[k].actual_ytd += v; else out[k].projected_rest += v;
+    }
+  }
+  out.gross_margin = out.revenue.full_year > 0 ? Math.round(out.gross.full_year / out.revenue.full_year * 1000) / 10 : null;
+  out.net_margin = out.revenue.full_year > 0 ? Math.round(out.net.full_year / out.revenue.full_year * 1000) / 10 : null;
+  return out;
 }
 
 function render() {
@@ -252,15 +344,18 @@ function render() {
   const pm = data.projected_months || [];
   const lastActual = am.length ? Math.max(...am) : 0;
 
-  const methodName = { target: '今年度目標', average: `1~${lastActual||'N'}月平均`, conservative: '保守(取低)' }[data.method];
+  const methodName = { target: '今年度目標', average: `1~${lastActual||'N'}月平均`, conservative: '保守(取低)',
+    workday: '工作天數推估（日產能×各月工作天數）', target_pct: `目標 × ${Math.round((data.factor||0)*100)}%` }[data.method] || data.method;
   let hint = am.length
     ? `已實現 ${am.join('/')} 月｜後續 ${pm.join('/')} 月用「${methodName}」推估`
     : '⚠ 此年度該廠尚無 DMS 實際資料，全部月份依推估顯示';
   if (_version) hint += `｜版本：${_version}`;
   if (_editMode) hint += '｜✏️ 編列中（綠色格可編輯，實際月份鎖定）';
   document.getElementById('methodHint').textContent = hint;
+  const cr = _data.basis && _data.basis.cost_ratio != null ? (Math.round(_data.basis.cost_ratio * 1000) / 10) : null;
   document.getElementById('statusBar').textContent =
-    `資料口徑：四大營收（有費/鈑烤/一般/延保），單位：元。實際月份=${am.length}，推估月份=${pm.length}`;
+    `損益口徑：營收（四大營收）− 營業成本 = 材料毛利 − 營業費用 = 營業淨利，單位：元。` +
+    `成本率(已實現)=${cr != null ? cr + '%' : '—'}｜實際月份=${am.length}，推估月份=${pm.length}`;
 
   const view = computeView();
   renderCards(view);
@@ -285,6 +380,27 @@ function refreshComputed() {
   setText('tot_full', fmt(t.full_year));
   setText('tot_target', fmt(t.target_full_year));
   setCell('tot_gappct', t.gap_pct != null ? t.gap_pct + '%' : '—', t.gap >= 0 ? 'pos' : 'neg');
+
+  // 損益區即時更新（不動 input：成本後續月、費用所有月份為輸入框，故只改文字格與小計）
+  const p = computePnl(view);
+  const sc = v => (v >= 0 ? 'pos' : 'neg');
+  for (const m of MONTHS) {
+    const cell = p.months[m];
+    setText(`pc_m_${m}`, fmt(cell.cost));           // 僅實際月份為文字格
+    setCell(`pg_m_${m}`, fmt(cell.gross), sc(cell.gross));
+    setText(`pgm_m_${m}`, cell.gm != null ? cell.gm + '%' : '—');
+    setCell(`pn_m_${m}`, fmt(cell.net), sc(cell.net));
+    setText(`pnm_m_${m}`, cell.nm != null ? cell.nm + '%' : '—');
+  }
+  setText('pc_ytd', fmt(p.cost.actual_ytd)); setText('pc_proj', fmt(p.cost.projected_rest)); setText('pc_full', fmt(p.cost.full_year));
+  setCell('pg_ytd', fmt(p.gross.actual_ytd), ''); setCell('pg_proj', fmt(p.gross.projected_rest), '');
+  setCell('pg_full', fmt(p.gross.full_year), sc(p.gross.full_year));
+  setCell('pgm_full', p.gross_margin != null ? p.gross_margin + '%' : '—', p.gross_margin >= 0 ? 'pos' : 'neg');
+  setText('pe_ytd', fmt(p.expense.actual_ytd)); setText('pe_proj', fmt(p.expense.projected_rest)); setText('pe_full', fmt(p.expense.full_year));
+  setCell('pn_ytd', fmt(p.net.actual_ytd), ''); setCell('pn_proj', fmt(p.net.projected_rest), '');
+  setCell('pn_full', fmt(p.net.full_year), sc(p.net.full_year));
+  setCell('pnm_full', p.net_margin != null ? p.net_margin + '%' : '—', p.net_margin >= 0 ? 'pos' : 'neg');
+
   renderCards(view);
   renderChart(view);
 }
@@ -293,15 +409,21 @@ function setCell(id, txt, cls) { const el = document.getElementById(id); if (el)
 
 function renderCards(view) {
   const t = view.totals;
+  const p = computePnl(view);
   const gapCls = t.gap >= 0 ? 'pos' : 'neg';
   const gapSign = t.gap >= 0 ? '+' : '';
+  const grossCls = p.gross.full_year >= 0 ? 'pos' : 'neg';
+  const netCls = p.net.full_year >= 0 ? 'pos' : 'neg';
   const cards = [
-    { k: '已實現 (YTD)', v: fmt(t.actual_ytd), sub: `<span class="dim">${(view.actual_months||[]).length} 個月實際</span>` },
-    { k: _editMode ? '後續編列' : '後續推估', v: fmt(t.projected_rest), sub: `<span class="dim">${(view.projected_months||[]).length} 個月${_editMode ? '編列' : '推估'}</span>` },
-    { k: '全年預估', v: fmt(t.full_year), sub: `<span class="dim">實際 + ${_editMode ? '編列' : '推估'}</span>` },
-    { k: '今年度目標', v: fmt(t.target_full_year), sub: `<span class="dim">revenue_targets 全年</span>` },
-    { k: '預估 vs 目標', v: `<span class="${gapCls}">${gapSign}${fmt(t.gap)}</span>`,
-      sub: t.gap_pct != null ? `<span class="${gapCls}">達成率 ${t.gap_pct}%</span>` : '<span class="dim">—</span>' },
+    { k: '全年營收', v: fmt(t.full_year), sub: `<span class="dim">實際 + ${_editMode ? '編列' : '推估'}</span>` },
+    { k: '全年營業成本', v: fmt(p.cost.full_year), sub: `<span class="dim">成本率 ${p.cost_ratio != null ? (Math.round(p.cost_ratio*1000)/10) + '%' : '—'}</span>` },
+    { k: '全年材料毛利', v: `<span class="${grossCls}">${fmt(p.gross.full_year)}</span>`,
+      sub: p.gross_margin != null ? `<span class="${grossCls}">材料毛利率 ${p.gross_margin}%</span>` : '<span class="dim">—</span>' },
+    { k: '全年營業費用', v: fmt(p.expense.full_year), sub: `<span class="dim">財務編列</span>` },
+    { k: '全年營業淨利', v: `<span class="${netCls}">${fmt(p.net.full_year)}</span>`,
+      sub: p.net_margin != null ? `<span class="${netCls}">淨利率 ${p.net_margin}%</span>` : '<span class="dim">—</span>' },
+    { k: '今年度營收目標', v: fmt(t.target_full_year),
+      sub: t.gap_pct != null ? `<span class="${gapCls}">達成率 ${t.gap_pct}%（${gapSign}${fmt(t.gap)}）</span>` : '<span class="dim">revenue_targets 全年</span>' },
   ];
   document.getElementById('cards').innerHTML = cards.map(c =>
     `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="sub">${c.sub}</div></div>`
@@ -310,7 +432,7 @@ function renderCards(view) {
 
 function renderTable(view) {
   const am = new Set(view.actual_months || []);
-  let h = '<thead><tr><th class="lbl">營收項目</th>';
+  let h = '<thead><tr><th class="lbl">損益項目</th>';
   for (const m of MONTHS) {
     const cls = am.has(m) ? 'm-actual' : 'm-proj';
     const tag = am.has(m) ? '實' : (_editMode ? '編' : '估');
@@ -318,7 +440,8 @@ function renderTable(view) {
   }
   h += '<th>已實現</th><th>後續</th><th>全年預估</th><th>年度目標</th><th>達成率</th></tr></thead><tbody>';
 
-  for (const c of view.categories) {
+  // 有費(paid)＝鈑烤＋一般＋延保 是總額，等同下方「營收合計」，不另列為一行（避免重複與空編輯）
+  for (const c of view.categories.filter(c => c !== 'paid')) {
     const row = view.rows[c];
     h += `<tr><td class="lbl">${esc(row.label)}</td>`;
     for (const m of MONTHS) {
@@ -341,7 +464,7 @@ function renderTable(view) {
   }
 
   const t = view.totals;
-  h += `<tr class="total"><td class="lbl">營收合計</td>`;
+  h += `<tr class="total"><td class="lbl">營收合計（有費）</td>`;
   for (const m of MONTHS) {
     h += `<td id="tot_m_${m}">${fmt(t.months[m].value)}</td>`;
   }
@@ -349,6 +472,66 @@ function renderTable(view) {
   h += `<td id="tot_ytd">${fmt(t.actual_ytd)}</td><td id="tot_proj">${fmt(t.projected_rest)}</td>` +
        `<td id="tot_full">${fmt(t.full_year)}</td><td id="tot_target">${fmt(t.target_full_year)}</td>` +
        `<td class="${gapCls}" id="tot_gappct">${t.gap_pct != null ? t.gap_pct + '%' : '—'}</td></tr>`;
+
+  // ── 損益區（營業成本 / 材料毛利 / 材料毛利率 / 營業費用 / 營業淨利 / 淨利率）──
+  const p = computePnl(view);
+  const dash3 = '<td class="dim">—</td><td class="dim">—</td>'; // 年度目標 + 達成率 兩欄佔位
+  const signCls = v => (v >= 0 ? 'pos' : 'neg');
+
+  // 營業成本：所有月份皆可編列（已實現月份預設帶 DMS 料件成本，可覆寫補列其他成本）
+  h += `<tr style="border-top:2px solid #2d3f56"><td class="lbl">營業成本</td>`;
+  for (const m of MONTHS) {
+    const cell = p.months[m];
+    if (_editMode) {
+      h += `<td class="editing"><input type="number" step="1" id="in_cost_${m}" value="${Math.round(cell.cost)}" ` +
+           `oninput="onEditPnl('cost',${m},this.value)"></td>`;
+    } else {
+      const cls = cell.costSource === 'plan' ? 'cell-plan' : (cell.isActual ? 'cell-actual locked' : 'cell-proj');
+      h += `<td class="${cls}" id="pc_m_${m}">${fmt(cell.cost)}</td>`;
+    }
+  }
+  h += `<td id="pc_ytd">${fmt(p.cost.actual_ytd)}</td><td class="cell-proj" id="pc_proj">${fmt(p.cost.projected_rest)}</td>` +
+       `<td><strong id="pc_full">${fmt(p.cost.full_year)}</strong></td>${dash3}</tr>`;
+
+  // 材料毛利（衍生）
+  h += `<tr><td class="lbl">材料毛利</td>`;
+  for (const m of MONTHS) h += `<td class="${signCls(p.months[m].gross)}" id="pg_m_${m}">${fmt(p.months[m].gross)}</td>`;
+  h += `<td id="pg_ytd">${fmt(p.gross.actual_ytd)}</td><td id="pg_proj">${fmt(p.gross.projected_rest)}</td>` +
+       `<td><strong class="${signCls(p.gross.full_year)}" id="pg_full">${fmt(p.gross.full_year)}</strong></td>${dash3}</tr>`;
+
+  // 材料毛利率（衍生，全年值放「全年預估」欄）
+  h += `<tr><td class="lbl dim">材料毛利率</td>`;
+  for (const m of MONTHS) h += `<td class="dim" id="pgm_m_${m}">${p.months[m].gm != null ? p.months[m].gm + '%' : '—'}</td>`;
+  h += `<td class="dim">—</td><td class="dim">—</td>` +
+       `<td class="${p.gross_margin >= 0 ? 'pos' : 'neg'}" id="pgm_full">${p.gross_margin != null ? p.gross_margin + '%' : '—'}</td>${dash3}</tr>`;
+
+  // 營業費用：DMS 無，所有月份可編列
+  h += `<tr><td class="lbl">營業費用</td>`;
+  for (const m of MONTHS) {
+    const cell = p.months[m];
+    if (_editMode) {
+      h += `<td class="editing"><input type="number" step="1" id="in_expense_${m}" value="${Math.round(cell.exp)}" ` +
+           `oninput="onEditPnl('expense',${m},this.value)"></td>`;
+    } else {
+      const cls = cell.exp ? 'cell-plan' : 'dim';
+      h += `<td class="${cls}" id="pe_m_${m}">${fmt(cell.exp)}</td>`;
+    }
+  }
+  h += `<td id="pe_ytd">${fmt(p.expense.actual_ytd)}</td><td id="pe_proj">${fmt(p.expense.projected_rest)}</td>` +
+       `<td><strong id="pe_full">${fmt(p.expense.full_year)}</strong></td>${dash3}</tr>`;
+
+  // 營業淨利（衍生）
+  h += `<tr class="total"><td class="lbl">營業淨利</td>`;
+  for (const m of MONTHS) h += `<td class="${signCls(p.months[m].net)}" id="pn_m_${m}">${fmt(p.months[m].net)}</td>`;
+  h += `<td id="pn_ytd">${fmt(p.net.actual_ytd)}</td><td id="pn_proj">${fmt(p.net.projected_rest)}</td>` +
+       `<td><strong class="${signCls(p.net.full_year)}" id="pn_full">${fmt(p.net.full_year)}</strong></td>${dash3}</tr>`;
+
+  // 淨利率（衍生）
+  h += `<tr><td class="lbl dim">淨利率</td>`;
+  for (const m of MONTHS) h += `<td class="dim" id="pnm_m_${m}">${p.months[m].nm != null ? p.months[m].nm + '%' : '—'}</td>`;
+  h += `<td class="dim">—</td><td class="dim">—</td>` +
+       `<td class="${p.net_margin >= 0 ? 'pos' : 'neg'}" id="pnm_full">${p.net_margin != null ? p.net_margin + '%' : '—'}</td>${dash3}</tr>`;
+
   h += '</tbody>';
   document.getElementById('tbl').innerHTML = h;
 }
@@ -356,7 +539,8 @@ function renderTable(view) {
 function renderChart(view) {
   const am = new Set(view.actual_months || []);
   const t = view.totals;
-  const actualBars = [], projBars = [], targetLine = [];
+  const p = computePnl(view);
+  const actualBars = [], projBars = [], targetLine = [], netLine = [];
   for (const m of MONTHS) {
     const v = (t.months[m] && t.months[m].value) || 0;
     if (am.has(m)) { actualBars.push(v); projBars.push(null); }
@@ -364,9 +548,11 @@ function renderChart(view) {
     // 年度目標逐月（從各 category 目標加總）
     let tgt = 0;
     for (const c of view.categories) {
+      if (c === 'paid') continue;   // 有費=分項總和，避免重複
       tgt += (view.basis.target_per_month[m] && view.basis.target_per_month[m][c]) || 0;
     }
     targetLine.push(tgt);
+    netLine.push(p.months[m].net);   // 營業淨利逐月
   }
   const ctx = document.getElementById('chart').getContext('2d');
   if (_chart) _chart.destroy();
@@ -374,10 +560,12 @@ function renderChart(view) {
     data: {
       labels: MONTHS.map(m => m + '月'),
       datasets: [
-        { type: 'bar', label: '實際', data: actualBars, backgroundColor: 'rgba(59,130,246,.8)', stack: 's' },
-        { type: 'bar', label: '推估', data: projBars, backgroundColor: 'rgba(245,158,11,.8)', stack: 's' },
+        { type: 'bar', label: '營收-實際', data: actualBars, backgroundColor: 'rgba(59,130,246,.8)', stack: 's' },
+        { type: 'bar', label: '營收-推估', data: projBars, backgroundColor: 'rgba(245,158,11,.8)', stack: 's' },
         { type: 'line', label: '今年度目標', data: targetLine, borderColor: '#94a3b8',
           borderDash: [6,4], borderWidth: 2, pointRadius: 2, fill: false, tension: .2 },
+        { type: 'line', label: '營業淨利', data: netLine, borderColor: '#a78bfa',
+          borderWidth: 2, pointRadius: 2, fill: false, tension: .2 },
       ],
     },
     options: {
@@ -395,14 +583,21 @@ function renderChart(view) {
 }
 
 // ════════════════════ 編列模式 ════════════════════
-// 以目前 _data 的後續（非實際）月份值作為編輯起點
+// 以目前 _data 的值作為編輯起點。
+// 營收四項：僅後續月份可編（實際月份營收恆採 DMS）。
+// 營業成本：所有月份皆可編（已實現月份預設帶 DMS 料件成本，後續月份帶推估值）。
+// 營業費用：所有月份皆可編（DMS 無來源，預設 0 或已載入版本值）。
 function seedPlanFromData() {
   const am = actualSet();
+  const srvPnl = _data.pnl || null;
   _planValues = {};
   for (const m of MONTHS) {
-    if (am.has(m)) continue;
     _planValues[m] = {};
-    for (const c of CATS) _planValues[m][c] = Math.round(_data.rows[c].months[m].value);
+    if (!am.has(m)) {
+      for (const c of CATS) _planValues[m][c] = Math.round(_data.rows[c].months[m].value);
+    }
+    _planValues[m].cost = Math.round((srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].value) || 0);
+    _planValues[m].expense = Math.round((srvPnl && srvPnl.expense.months[m] && srvPnl.expense.months[m].value) || 0);
   }
 }
 
@@ -432,18 +627,26 @@ function syncEditToolbar() {
   if (on && _version) document.getElementById('versionInp').value = _version;
 }
 
-// 用目前推估法的數字重新填入可編輯月份（覆蓋手動編輯）
+// 用目前推估法的數字重新填入可編輯的營收／營業成本月份（覆蓋手動編輯）
+// 營業費用為純手動編列、無推估來源，故不在此覆蓋，保留已輸入值。
 function applyProjectionToEdits() {
-  if (!confirm('用目前推估法的數字覆蓋所有可編輯月份？已手動改的值會被蓋掉。')) return;
+  if (!confirm('用目前推估法的數字覆蓋：後續月份營收、所有月份營業成本（已實現月份回填 DMS 料件成本）？已手動改的值會被蓋掉（營業費用不受影響）。')) return;
   const am = actualSet();
+  const srvPnl = _data.pnl || null;
   for (const m of MONTHS) {
-    if (am.has(m)) continue;
-    for (const c of CATS) {
-      const v = Math.round(_data.rows[c].months[m].value);
-      _planValues[m][c] = v;
-      const inp = document.getElementById(`in_${c}_${m}`);
-      if (inp) inp.value = v;
+    if (!am.has(m)) {
+      for (const c of CATS) {
+        const v = Math.round(_data.rows[c].months[m].value);
+        _planValues[m][c] = v;
+        const inp = document.getElementById(`in_${c}_${m}`);
+        if (inp) inp.value = v;
+      }
     }
+    // 營業成本所有月份回填：已實現月份＝DMS、後續月份＝推估
+    const cv = Math.round((srvPnl && srvPnl.cost.months[m] && srvPnl.cost.months[m].value) || 0);
+    _planValues[m].cost = cv;
+    const cinp = document.getElementById(`in_cost_${m}`);
+    if (cinp) cinp.value = cv;
   }
   refreshComputed();
 }
@@ -455,15 +658,28 @@ function onEditCell(c, m, val) {
   refreshComputed();
 }
 
+// 編列營業成本(cost)／營業費用(expense)
+function onEditPnl(field, m, val) {
+  if (!_planValues[m]) _planValues[m] = {};
+  const n = parseFloat(val);
+  _planValues[m][field] = isNaN(n) ? 0 : n;
+  refreshComputed();
+}
+
 async function savePlan() {
   const verRaw = (document.getElementById('versionInp').value || _version || '').trim();
   if (!verRaw) { alert('請先輸入版本名稱（例如：2026核定版）'); document.getElementById('versionInp').focus(); return; }
   const am = actualSet();
   const items = [];
   for (const m of MONTHS) {
-    if (am.has(m)) continue;   // 實際月份不存（以 DMS 為準）
     const pv = _planValues[m] || {};
-    items.push({ month: m, paid: pv.paid||0, bodywork: pv.bodywork||0, general: pv.general||0, extended: pv.extended||0 });
+    if (am.has(m)) {
+      // 實際月份：營收以 DMS 為準（存 0、讀取時忽略）；營業成本與費用皆可編列並保存
+      items.push({ month: m, paid: 0, bodywork: 0, general: 0, extended: 0, cost: pv.cost||0, expense: pv.expense||0 });
+    } else {
+      items.push({ month: m, paid: pv.paid||0, bodywork: pv.bodywork||0, general: pv.general||0,
+        extended: pv.extended||0, cost: pv.cost||0, expense: pv.expense||0 });
+    }
   }
   try {
     const r = await fetch('/api/budget-projection/plan', {
@@ -534,9 +750,9 @@ function onVersionChange() {
 function exportCsv() {
   if (!_data) return;
   const view = computeView();
-  const head = ['營收項目', ...MONTHS.map(m => m + '月'), '已實現', '後續', '全年預估', '年度目標', '達成率%'];
+  const head = ['損益項目', ...MONTHS.map(m => m + '月'), '已實現', '後續', '全年預估', '年度目標', '達成率%'];
   const lines = [head.join(',')];
-  for (const c of view.categories) {
+  for (const c of view.categories.filter(c => c !== 'paid')) {
     const row = view.rows[c];
     const cells = [row.label,
       ...MONTHS.map(m => Math.round(row.months[m].value)),
@@ -545,9 +761,23 @@ function exportCsv() {
     lines.push(cells.join(','));
   }
   const t = view.totals;
-  lines.push(['營收合計', ...MONTHS.map(m => Math.round(t.months[m].value)),
+  lines.push(['營收合計(有費)', ...MONTHS.map(m => Math.round(t.months[m].value)),
     Math.round(t.actual_ytd), Math.round(t.projected_rest), Math.round(t.full_year),
     Math.round(t.target_full_year), t.gap_pct != null ? t.gap_pct : ''].join(','));
+
+  // 損益區
+  const p = computePnl(view);
+  const moneyRow = (label, line) => [label, ...MONTHS.map(m => Math.round(line.months[m])),
+    Math.round(line.actual_ytd), Math.round(line.projected_rest), Math.round(line.full_year), '', ''].join(',');
+  lines.push(moneyRow('營業成本', p.cost));
+  lines.push(moneyRow('材料毛利', p.gross));
+  lines.push(['材料毛利率%', ...MONTHS.map(m => p.months[m].gm != null ? p.months[m].gm : ''),
+    '', '', p.gross_margin != null ? p.gross_margin : '', '', ''].join(','));
+  lines.push(moneyRow('營業費用', p.expense));
+  lines.push(moneyRow('營業淨利', p.net));
+  lines.push(['淨利率%', ...MONTHS.map(m => p.months[m].nm != null ? p.months[m].nm : ''),
+    '', '', p.net_margin != null ? p.net_margin : '', '', ''].join(','));
+
   const csv = '﻿' + lines.join('\r\n');   // BOM 讓 Excel 正確讀 UTF-8
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
@@ -564,7 +794,86 @@ function flash(msg) {
   setTimeout(() => { bar.style.color = ''; render(); }, 2500);
 }
 
+// ════════════════════ 資料庫連線狀態 ════════════════════
+function setDbBar(cls, inner) {
+  const el = document.getElementById('dbStatus');
+  if (!el) return;
+  el.className = 'dbbar ' + cls;
+  el.innerHTML = inner +
+    ` <button class="btn" style="margin-left:auto;padding:3px 10px" onclick="checkDbStatus()">🔄 重新檢查</button>`;
+}
+const DB_TABLES = [
+  { key: 'repair_income',      label: 'repair_income（營收/成本）', src: true },
+  { key: 'revenue_targets',    label: 'revenue_targets（目標）',    src: true },
+  { key: 'income_config',      label: 'income_config',              src: false },
+  { key: 'parts_sales',        label: 'parts_sales',                src: false },
+  { key: 'revenue_budget_plan',label: 'revenue_budget_plan（本服務）',src: false },
+];
+function tableChip(t, info) {
+  if (!info || !info.exists) return `<span class="db-chip off">✗ ${esc(t.label)}</span>`;
+  return `<span class="db-chip on">✓ ${esc(t.label)} ${info.rows != null ? info.rows.toLocaleString() + ' 筆' : ''}</span>`;
+}
+async function checkDbStatus() {
+  setDbBar('', `<span class="db-dot wait"></span><span class="db-title">資料庫連線</span><span class="db-meta">檢查中…</span>`);
+  // 先打 /db-check（含 DMS 來源表判定）；舊版部署沒這端點時退而用 /healthz
+  let r;
+  try { r = await fetch('/db-check', { cache: 'no-store' }); }
+  catch (e) {
+    return setDbBar('bad', `<span class="db-dot bad"></span><span class="db-title">🔴 連線檢查失敗</span><span class="db-meta">無法呼叫後端：${esc(e.message)}</span>`);
+  }
+
+  if (r.status === 404) {
+    // 部署的是舊版（沒有 /db-check）→ 用基本 /healthz 試
+    return checkHealthzFallback();
+  }
+
+  let d = {};
+  try { d = await r.json(); } catch (e) { /* 非 JSON */ }
+
+  if (!d.db_connected) {
+    const target = d.target ? `（目標 ${esc(d.target)}）` : '';
+    return setDbBar('bad',
+      `<span class="db-dot bad"></span><span class="db-title">🔴 未連線到資料庫</span>` +
+      `<span class="db-meta">${esc(d.db_error || '連線失敗')} ${target}</span>`);
+  }
+
+  // 已連線：列出來源表狀態與 DMS 判定
+  const chips = DB_TABLES.map(t => tableChip(t, d.tables && d.tables[t.key])).join(' ');
+  const dms = d.looks_like_dms, hasData = d.has_data;
+  const cls = dms && hasData ? 'ok' : 'warn';
+  const dot = dms && hasData ? 'ok' : 'warn';
+  const title = dms && hasData
+    ? '🟢 已連線（DMS 來源就緒）'
+    : (dms ? '🟡 已連線，但來源表沒有資料' : '🟡 已連線，但找不到 DMS 來源表');
+  const verdict = dms && hasData
+    ? ''
+    : `<span class="db-meta">｜${dms ? '⚠ repair_income / revenue_targets 是空的——預算頁不會有數字' : '⚠ 這顆 DB 沒有 DMS 來源表，可能不是 DMS 平台用的那顆 Postgres'}</span>`;
+  setDbBar(cls,
+    `<span class="db-dot ${dot}"></span><span class="db-title">${title}</span>` +
+    `<span class="db-meta">DB: ${esc(d.database || '?')} ＠ ${esc(d.target || '?')}</span> ${chips} ${verdict}`);
+}
+// 舊版部署沒有 /db-check 時，退而用 /healthz 顯示基本連線狀態
+async function checkHealthzFallback() {
+  try {
+    const r = await fetch('/healthz', { cache: 'no-store' });
+    const d = await r.json();
+    const connected = d.db_connected != null ? d.db_connected : d.db;  // 相容強化版/原始版
+    if (connected) {
+      setDbBar('warn',
+        `<span class="db-dot warn"></span><span class="db-title">🟡 已連線（基本檢查）</span>` +
+        `<span class="db-meta">此版本沒有 /db-check，無法確認 DMS 來源表。${d.target ? 'DB ＠ ' + esc(d.target) : ''}｜建議部署含診斷的版本</span>`);
+    } else {
+      setDbBar('bad',
+        `<span class="db-dot bad"></span><span class="db-title">🔴 未連線到資料庫</span>` +
+        `<span class="db-meta">${esc(d.db_error || 'DB 未就緒')}</span>`);
+    }
+  } catch (e) {
+    setDbBar('bad', `<span class="db-dot bad"></span><span class="db-title">🔴 連線檢查失敗</span><span class="db-meta">${esc(e.message)}</span>`);
+  }
+}
+
 // 精簡獨立版：無登入，直接載入。
+checkDbStatus();
 loadProjection();
 </script>
 </body>

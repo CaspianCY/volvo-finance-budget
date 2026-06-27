@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📐 預算參數（實績反推） — Volvo Finance Budget</title>
+<style>
+  :root { --text-dim: #94a3b8; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Microsoft JhengHei", sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+  .sticky-header { position: sticky; top: 0; z-index: 200; background: #0f172a; box-shadow: 0 4px 24px rgba(0,0,0,.6); }
+  .nav { background: #1e293b; border-bottom: 1px solid #2d3f56; padding: 0 24px; display: flex; align-items: center; overflow-x: auto; }
+  .nav-brand { font-size: 15px; font-weight: 700; color: #fff; padding: 16px 0; margin-right: 24px; white-space: nowrap; }
+  .nav-link { padding: 16px 16px; color: var(--text-dim); font-size: 13px; font-weight: 600; text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .nav-link:hover { color: #e2e8f0; }
+  .nav-link.active { color: #3b82f6; border-bottom-color: #3b82f6; }
+  .container { padding: 14px 20px; max-width: 100%; }
+  .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .toolbar select { background: #1a2332; border: 1px solid #2d3f56; color: #e2e8f0; padding: 6px 10px; border-radius: 6px; font-size: 13px; }
+  .toolbar select:focus { outline: none; border-color: #3b82f6; }
+  .btn { background: rgba(59,130,246,.15); color: #60a5fa; border: 1px solid rgba(59,130,246,.4);
+    padding: 6px 14px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .btn:hover { background: rgba(59,130,246,.25); }
+  .hint { font-size: 12px; color: var(--text-dim); }
+  .basis { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: #1a2332; border: 1px solid #2d3f56;
+    border-radius: 10px; padding: 9px 14px; margin-bottom: 12px; font-size: 12px; }
+  .basis .b-on { color: #6ee7b7; } .basis .b-warn { color: #fbbf24; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .card { background: #1a2332; border: 1px solid #2d3f56; border-radius: 10px; padding: 12px 14px; }
+  .card .k { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .card .v { font-size: 22px; font-weight: 900; color: #fff; }
+  .card .sub { font-size: 11px; margin-top: 4px; }
+  .pos { color: #34d399; } .neg { color: #fca5a5; } .dim { color: var(--text-dim); }
+  .grid-wrap { background: #1a2332; border: 1px solid #2d3f56; border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+  .grid-scroll { overflow: auto; }
+  table.pj { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; min-width: 760px; }
+  table.pj th, table.pj td { padding: 7px 10px; border-bottom: 1px solid rgba(45,63,86,.4); border-right: 1px solid rgba(45,63,86,.2); text-align: right; white-space: nowrap; }
+  table.pj th { background: #16202e; color: #94a3b8; font-weight: 700; position: sticky; top: 0; z-index: 2; }
+  table.pj td.lbl, table.pj th.lbl { text-align: left; position: sticky; left: 0; background: #1a2332; z-index: 1; font-weight: 700; color: #e2e8f0; }
+  table.pj th.lbl { z-index: 3; background: #16202e; }
+  table.pj td.tot { background: #14203a; font-weight: 900; color: #fff; }
+  table.pj tr.section td { background: #16202e; color: #93c5fd; font-weight: 800; }
+  table.pj tr.bold td { font-weight: 900; color: #fff; }
+  .err { color: #fca5a5; font-size: 13px; padding: 10px; }
+</style>
+</head>
+<body>
+<div class="sticky-header">
+  <nav class="nav">
+    <span class="nav-brand">🚗 Volvo 財務預算</span>
+    <a href="/budget-projection.html" class="nav-link">📊 全年損益預算編列</a>
+    <a href="/budget-params.html" class="nav-link active">📐 預算參數（實績反推）</a>
+  </nav>
+</div>
+
+<div class="container">
+  <div class="toolbar">
+    <h2 style="font-size:17px;font-weight:900;color:#fff">📐 預算參數</h2>
+    <select id="yearSel" onchange="load()"></select>
+    <select id="branchSel" onchange="load()">
+      <option value="AMA">AMA</option>
+      <option value="AMC">AMC</option>
+      <option value="AMD">AMD</option>
+      <option value="AME">AME</option>
+      <option value="ALL">四廠合計</option>
+    </select>
+    <span class="hint">期間</span>
+    <select id="fromSel" onchange="load()"></select>
+    <span class="hint">~</span>
+    <select id="toSel" onchange="load()"></select>
+    <span class="hint" id="rangeHint"></span>
+    <label class="hint" style="display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:8px">
+      <input type="checkbox" id="projChk" onchange="load()"> 顯示全年（後續月份工作天數推估）
+    </label>
+    <button class="btn" onclick="genBudget()" style="margin-left:auto;background:rgba(52,211,153,.15);color:#34d399;border-color:rgba(52,211,153,.4)" title="用全年推估產生一個預算編列版本，到損益預估頁載入微調">📋 產生年度預算</button>
+    <button class="btn" onclick="exportCsv()">⬇️ 匯出 CSV</button>
+  </div>
+
+  <div id="basis" class="basis" style="display:none"></div>
+
+  <!-- 工作天數編輯器：每月可手動覆寫（綠＝手動、灰＝月曆預設），存後即影響本頁與全年預估的「工作天數推估法」 -->
+  <div id="wdWrap" style="background:#1a2332;border:1px solid #2d3f56;border-radius:10px;padding:10px 14px;margin-bottom:12px;display:none">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-weight:800;color:#cbd5e1;font-size:13px">🗓 工作天數（每月可手動覆寫）</span>
+      <span class="hint" id="wdHint"></span>
+      <button class="btn" onclick="saveWd()" style="margin-left:auto">💾 儲存工作天數</button>
+      <button class="btn" onclick="resetWd()" style="background:rgba(245,158,11,.15);color:#fbbf24;border-color:rgba(245,158,11,.4)">↺ 還原月曆預設</button>
+    </div>
+    <div id="wdRow" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+  </div>
+
+  <div id="errBox" class="err" style="display:none"></div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="grid-wrap">
+    <div class="grid-scroll">
+      <table class="pj" id="tbl"></table>
+    </div>
+  </div>
+
+  <h3 id="bdTitle" style="font-size:14px;font-weight:800;color:#cbd5e1;margin:6px 0 8px;display:none">📋 帳類明細（營收 / 料件成本 / 材料毛利）</h3>
+  <div class="grid-wrap" id="bdWrap" style="display:none">
+    <div class="grid-scroll">
+      <table class="pj" id="bdTbl"></table>
+    </div>
+  </div>
+
+  <div class="hint" style="margin-bottom:30px;line-height:1.7">
+    <b>用途</b>：把已實現月份（如 2026/1–5）的 DMS 實績反推成編列預算的驅動因子。<br>
+    <b>產生年度預算</b>：按「📋 產生年度預算」會用全年推估（1~5實際＋6~12推估）把後續月份的有費營收與有費料件成本寫成一個編列版本（存進 revenue_budget_plan），之後到「全年損益預算編列」頁選該版本即可載入微調、核定。<br>
+    <b>顯示全年</b>：勾選後，結束月之後到 12 月用「工作天數推估」補上（黃色「估」欄）——各月總營收＝日產能(實際Σ營收÷Σ工作天數)×該月工作天數；營收結構/占比/成本率/單車產值沿用實際月份，台數＝日均台數×工作天數。<br>
+    <b>有費 / 無費口徑</b>：有費（一般／自費鈑烤／保險鈑烤／延保／票券）採實際營收；<strong>無費（保固／善意／內結／VSA…不收費）以「成本」計入營收</strong>（無費營收＝無費成本、無費材料毛利＝0）。
+    <strong>總營收 ＝ 有費營收 ＋ 無費成本</strong>；占比分母為此總營收；材料毛利額實質＝有費營收−有費成本。
+    <small style="color:#64748b">（下方「帳類明細」表為原始 DMS 帳類，營收用 <code>total_untaxed</code> 原值、未套用此調整，供對帳。）</small><br>
+    <b>工作天數</b>：若 DMS 有日期欄，採該月不重複營業日；否則以月曆「週一~週五」估算（依據列於上方狀態）。<br>
+    <b>進廠台數</b>：若 DMS 有工單／車輛識別欄，採不重複計數；否則無法計算（顯示 —）。<br>
+    <b>單車消費額</b>：整體單車產值＝總營收÷台數；有費客單價＝有費營收÷台數。<br>
+    <b>材料毛利</b>：材料毛利額＝總營收−營業成本（成本＝<code>parts_cost</code>，<strong>僅料件、未含技工工資／外包</strong>）；材料毛利率＝材料毛利÷總營收。此為材料毛利，非完整毛利。<br>
+    <b>帳類明細</b>：按 DMS <code>account_type</code> 逐筆列出營收／料件成本／材料毛利（保固、善意、內帳、票券、一般、保險、延保…用真實帳類名稱呈現）。
+    鈑烤拆分：<b>自費鈑烤</b>＝「一般」帳類中有鈑烤(鈑金/烤漆)的部分；<b>保險鈑烤</b>＝「保險」帳類。
+  </div>
+</div>
+
+<script>
+let _data = null;
+const MN = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmt(v){ return v==null?'—':Math.round(v).toLocaleString(); }
+function fmt1(v){ return v==null?'—':(Math.round(v*10)/10).toLocaleString(); }
+function pctTxt(v){ return v==null?'—':v+'%'; }
+
+(function init(){
+  const y=document.getElementById('yearSel'), now=new Date().getFullYear();
+  for(let yy=now+1; yy>=now-6; yy--){ const o=document.createElement('option'); o.value=yy; o.textContent=yy+' 年'; if(yy===2026)o.selected=true; y.appendChild(o); }
+  if(!y.value) y.value=now;
+  const f=document.getElementById('fromSel'), t=document.getElementById('toSel');
+  for(let m=1;m<=12;m++){ const a=document.createElement('option'); a.value=m; a.textContent=m+'月'; if(m===1)a.selected=true; f.appendChild(a);
+    const b=document.createElement('option'); b.value=m; b.textContent=m+'月'; if(m===5)b.selected=true; t.appendChild(b); }
+})();
+const val = id => document.getElementById(id).value;
+
+async function load(){
+  const errBox=document.getElementById('errBox'); errBox.style.display='none';
+  let from=parseInt(val('fromSel')), to=parseInt(val('toSel'));
+  if(from>to){ document.getElementById('toSel').value=from; to=from; }
+  document.getElementById('rangeHint').textContent='載入中…';
+  try{
+    let url=`/api/budget-params?year=${val('yearSel')}&branch=${encodeURIComponent(val('branchSel'))}&from=${from}&to=${to}`;
+    if(document.getElementById('projChk').checked) url+='&project=workday';
+    const r=await fetch(url); const d=await r.json();
+    if(!r.ok) throw new Error(d.error||'載入失敗');
+    _data=d; render();
+  }catch(e){
+    document.getElementById('rangeHint').textContent='';
+    errBox.textContent='✗ '+esc(e.message); errBox.style.display='block';
+  }
+  loadWorkdays();
+}
+
+// ── 工作天數編輯器（全 12 個月）──
+let _wd = null;
+async function loadWorkdays(){
+  try{
+    const r=await fetch(`/api/workdays?year=${val('yearSel')}&branch=${encodeURIComponent(val('branchSel'))}`);
+    const d=await r.json(); if(!r.ok) throw new Error(d.error||'');
+    _wd=d; renderWd();
+  }catch(e){ document.getElementById('wdWrap').style.display='none'; }
+}
+function renderWd(){
+  if(!_wd) return;
+  document.getElementById('wdWrap').style.display='block';
+  let manual=0;
+  let h='';
+  for(let m=1;m<=12;m++){
+    const isManual=_wd.source[m]==='manual'; if(isManual)manual++;
+    const c=isManual?'#34d399':'#64748b';
+    h+=`<span style="display:inline-flex;align-items:center;gap:3px">`+
+       `<span class="hint" style="width:30px;text-align:right">${m}月</span>`+
+       `<input id="wd_${m}" type="number" min="0" max="31" step="0.5" value="${_wd.days[m]}" `+
+       `style="width:54px;background:#0f1a2b;border:1px solid ${c};color:${c};padding:4px 5px;border-radius:4px;font-size:12px;text-align:right;font-weight:700"></span>`;
+  }
+  document.getElementById('wdRow').innerHTML=h;
+  document.getElementById('wdHint').textContent=
+    `綠＝手動、灰＝月曆預設（週一~五，未扣假日）。目前手動覆寫 ${manual} 個月。儲存後 6~12 月的「工作天數推估法」即用此值。`;
+}
+async function saveWd(){
+  const items=[]; for(let m=1;m<=12;m++){ const v=document.getElementById('wd_'+m); if(v) items.push({month:m,days:parseFloat(v.value)||0}); }
+  try{
+    const r=await fetch('/api/workdays',{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({year:parseInt(val('yearSel')),branch:val('branchSel'),items})});
+    const d=await r.json(); if(!r.ok) throw new Error(d.error||'儲存失敗');
+    await loadWorkdays(); await load();
+    document.getElementById('wdHint').textContent='✓ 已儲存工作天數（'+d.written+' 個月）';
+  }catch(e){ alert('✗ '+(e.message||'儲存失敗')); }
+}
+async function resetWd(){
+  if(!confirm('還原全部 12 個月為月曆預設（清除手動覆寫）？')) return;
+  try{
+    for(let m=1;m<=12;m++){
+      await fetch(`/api/workdays?year=${val('yearSel')}&branch=${encodeURIComponent(val('branchSel'))}&month=${m}`,{method:'DELETE'});
+    }
+    await loadWorkdays(); await load();
+  }catch(e){ alert('✗ '+(e.message||'還原失敗')); }
+}
+
+function render(){
+  const d=_data;
+  const projTxt=(d.projected_months&&d.projected_months.length)?`　＋${d.projected_months[0]}~12月工作天數推估`:'';
+  document.getElementById('rangeHint').textContent=`${d.year}/${d.from}–${d.to} 實際${projTxt}　${d.branch}`;
+
+  // 依據列
+  const b=d.basis||{};
+  const uCls=b.units_source==='unavailable'?'b-warn':'b-on';
+  const wCls=b.workdays_source==='date'?'b-on':'b-warn';
+  document.getElementById('basis').style.display='flex';
+  document.getElementById('basis').innerHTML =
+    `<span class="dim">資料依據：</span>`+
+    `<span class="${wCls}">🗓 工作天數 — ${esc(b.workdays||'')}</span><span class="dim">｜</span>`+
+    `<span class="${uCls}">🚗 台數 — ${esc(b.units||'')}</span>`;
+
+  renderCards(d);
+  renderTable(d);
+  renderBreakdown(d);
+}
+
+// 帳類明細：各 account_type 的 營收 / 料件成本 / 材料毛利 / 材料毛利率，並標出自費鈑烤、保險鈑烤
+function renderBreakdown(d){
+  const b=d.breakdown;
+  const title=document.getElementById('bdTitle'), wrap=document.getElementById('bdWrap');
+  if(!b || !b.account_types || !b.account_types.length){ title.style.display='none'; wrap.style.display='none'; return; }
+  title.style.display='block'; wrap.style.display='block';
+  const costHint = b.has_cost ? '' : '（此 DB 無 parts_cost，成本以 0 計）';
+  let h=`<thead><tr><th class="lbl">帳類 account_type</th><th>營收</th><th>料件成本${costHint}</th><th>材料毛利</th><th>材料毛利率</th></tr></thead><tbody>`;
+  let tRev=0,tCost=0,tGross=0;
+  for(const t of b.account_types){
+    tRev+=t.rev; tCost+=t.cost; tGross+=t.gross;
+    h+=`<tr><td class="lbl">${esc(t.account_type)}</td><td>${fmt(t.rev)}</td><td>${fmt(t.cost)}</td>`+
+       `<td class="${t.gross>=0?'pos':'neg'}">${fmt(t.gross)}</td><td class="${t.gross_margin>=0?'pos':'neg'}">${pctTxt(t.gross_margin)}</td></tr>`;
+  }
+  h+=`<tr class="bold"><td class="lbl tot">合計</td><td class="tot">${fmt(tRev)}</td><td class="tot">${fmt(tCost)}</td>`+
+     `<td class="tot">${fmt(tGross)}</td><td class="tot">${pctTxt(tRev>0?Math.round(tGross/tRev*1000)/10:null)}</td></tr>`;
+  // 鈑烤拆分（自費 / 保險）
+  if(b.bodywork){
+    const bw=b.bodywork;
+    h+='<tr class="section"><td class="lbl">鈑烤拆分</td><td></td><td></td><td></td><td></td></tr>';
+    const bwRow=(label,rev,cost)=>`<tr><td class="lbl">${label}</td><td>${fmt(rev)}</td><td>${fmt(cost)}</td>`+
+      `<td class="${rev-cost>=0?'pos':'neg'}">${fmt(rev-cost)}</td><td class="dim">${pctTxt(rev>0?Math.round((rev-cost)/rev*1000)/10:null)}</td></tr>`;
+    h+=bwRow('　自費鈑烤（一般帳類中的鈑烤）', bw.self_rev, bw.self_cost);
+    h+=bwRow('　保險鈑烤（保險帳類）', bw.ins_rev, bw.ins_cost);
+  }
+  h+='</tbody>';
+  document.getElementById('bdTbl').innerHTML=h;
+}
+
+function renderCards(d){
+  const rev=d.revenue, u=d.units, pc=d.per_car;
+  const gm=d.gross_margin;
+  const cards=[
+    { k:'總營收（合計）', v:fmt(rev.total), sub:`<span class="dim">${d.from}–${d.to}月 ${d.months.length} 個月</span>` },
+    { k:'有費營收', v:fmt(rev.paid), sub:`<span class="dim">占總營收 ${pctTxt(rev.mix.paid)}</span>` },
+    { k:'營業成本', v:fmt(d.cost), sub:`<span class="dim">parts_cost（僅料件）</span>` },
+    { k:'材料毛利額', v:`<span class="${d.gross_profit>=0?'pos':'neg'}">${fmt(d.gross_profit)}</span>`, sub:`<span class="${gm>=0?'pos':'neg'}">材料毛利率 ${pctTxt(gm)}</span>` },
+    { k:'工作天數（合計）', v:fmt(d.workdays.total), sub:`<span class="dim">月均 ${fmt1(d.workdays.avg_per_month)} 天</span>` },
+    { k:'日產能（總營收/工作天）', v:d.workdays.total>0?fmt(rev.total/d.workdays.total):'—', sub:`<span class="dim">工作天數推估法的基礎</span>` },
+    { k:'進廠台數（合計）', v:u?fmt(u.total):'—', sub:u?`<span class="dim">日均 ${fmt1(u.per_day)}｜月均 ${fmt1(u.per_month)}</span>`:`<span class="b-warn" style="color:#fbbf24">無工單欄位</span>` },
+    { k:'整體單車產值', v:pc?fmt(pc.overall):'—', sub:pc?`<span class="dim">有費客單價 ${fmt(pc.paid)}</span>`:'<span class="dim">需台數</span>' },
+  ];
+  document.getElementById('cards').innerHTML = cards.map(c=>
+    `<div class="card"><div class="k">${c.k}</div><div class="v">${c.v}</div><div class="sub">${c.sub}</div></div>`).join('');
+}
+
+// 表：列＝項目，欄＝各月＋合計/平均
+function renderTable(d){
+  const ms=d.months, pm=d.per_month, rev=d.revenue;
+  const proj=new Set(d.projected_months||[]);
+  let h='<thead><tr><th class="lbl">項目</th>';
+  for(const m of ms){ const isP=proj.has(m);
+    h+=`<th${isP?' style="color:#fbbf24"':''}>${MN[m-1]}${isP?'<br><span style="font-size:10px;opacity:.8">估</span>':''}</th>`; }
+  h+='<th>合計/平均</th></tr></thead><tbody>';
+
+  const sumRow=(label,pick,total,opts={})=>{
+    const cls=opts.cls||'';
+    let s=`<tr class="${cls}"><td class="lbl">${label}</td>`;
+    for(const m of ms) s+=`<td>${opts.fmt?opts.fmt(pick(pm[m])):fmt(pick(pm[m]))}</td>`;
+    s+=`<td class="tot">${opts.totFmt?opts.totFmt(total):fmt(total)}</td></tr>`;
+    return s;
+  };
+  const pctRow=(label,perMonthPct,totalPct)=>{
+    let s=`<tr><td class="lbl dim">${label}</td>`;
+    for(const m of ms){ const x=pm[m]; const base=x.total>0?x.total:null; const v=base?Math.round(perMonthPct(x)/base*1000)/10:null; s+=`<td class="dim">${pctTxt(v)}</td>`; }
+    s+=`<td class="tot">${pctTxt(totalPct)}</td></tr>`;
+    return s;
+  };
+  // 細分類（依帳類）逐月列：一般(不含鈑烤)/自費鈑烤/保險鈑烤/延保/保固/善意/內帳/票券…
+  const det = d.breakdown && d.breakdown.detail;
+  const detRow=(label,key,field,total)=>{
+    let s=`<tr><td class="lbl">${label}</td>`;
+    for(const m of ms){ const c=det.per_month[m]&&det.per_month[m][key]; s+=`<td>${fmt(c?c[field]:0)}</td>`; }
+    s+=`<td class="tot">${fmt(total)}</td></tr>`;
+    return s;
+  };
+  const detPctRow=(label,key,totalPct)=>{
+    let s=`<tr><td class="lbl dim">${label}</td>`;
+    for(const m of ms){ const mt=pm[m].total; const c=det.per_month[m]&&det.per_month[m][key]; const v=mt>0?Math.round((c?c.rev:0)/mt*1000)/10:null; s+=`<td class="dim">${pctTxt(v)}</td>`; }
+    s+=`<td class="tot">${pctTxt(totalPct)}</td></tr>`;
+    return s;
+  };
+  // 有費/無費 群組小計（grp = det.groups.paid|free）
+  const grpRow=(label,grp,field,opts={})=>{
+    let s=`<tr class="${opts.cls||''}"><td class="lbl">${label}</td>`;
+    for(const m of ms){ const x=grp.per_month[m]; s+=`<td>${fmt(x?x[field]:0)}</td>`; }
+    s+=`<td class="tot">${fmt(grp[field])}</td></tr>`;
+    return s;
+  };
+  const grpMarginRow=(label,grp)=>{
+    let s=`<tr><td class="lbl dim">${label}</td>`;
+    for(const m of ms){ const x=grp.per_month[m]; const v=(x&&x.rev>0)?Math.round((x.rev-x.cost)/x.rev*1000)/10:null; s+=`<td class="dim">${pctTxt(v)}</td>`; }
+    s+=`<td class="tot">${pctTxt(grp.margin)}</td></tr>`;
+    return s;
+  };
+  const grp = det && det.groups;
+  const section=(label)=>`<tr class="section"><td class="lbl">${label}</td>`+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
+  const subHead=(label)=>`<tr><td class="lbl" style="color:#93c5fd;font-weight:800">${label}</td>`+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
+  const paidCats = det ? det.categories.filter(c=>c.paid) : [];
+  const freeCats = det ? det.categories.filter(c=>!c.paid) : [];
+
+  if(det && grp){
+    // ── 營收（分有費 / 無費兩組，各列成分 + 小計）──
+    h+=section('營收');
+    h+=sumRow('總營收', x=>x.total, rev.total, {cls:'bold'});
+    h+=subHead('〔有費〕成分');
+    for(const c of paidCats) h+=detRow('　'+c.label, c.key, 'rev', det.totals[c.key].rev);
+    h+=grpRow('　有費營收 小計', grp.paid, 'rev', {cls:'bold'});
+    h+=subHead('〔無費〕成分（不收費→以成本計入營收，營收＝成本）');
+    for(const c of freeCats) h+=detRow('　'+c.label, c.key, 'rev', det.totals[c.key].rev);
+    h+=grpRow('　無費 小計（以成本計）', grp.free, 'rev', {cls:'bold'});
+
+    // ── 占比（分組）──
+    h+=section('營收占比（÷總營收）');
+    h+=subHead('〔有費〕');
+    for(const c of paidCats) h+=detPctRow('　'+c.label+' %', c.key, det.totals[c.key].mix);
+    h+=`<tr class="bold"><td class="lbl">　有費 合計 %</td>`+ms.map(m=>{const mt=pm[m].total;const x=grp.paid.per_month[m];return `<td>${pctTxt(mt>0?Math.round((x?x.rev:0)/mt*1000)/10:null)}</td>`;}).join('')+`<td class="tot">${pctTxt(grp.paid.mix)}</td></tr>`;
+    h+=subHead('〔無費〕');
+    for(const c of freeCats) h+=detPctRow('　'+c.label+' %', c.key, det.totals[c.key].mix);
+    h+=`<tr class="bold"><td class="lbl">　無費 合計 %</td>`+ms.map(m=>{const mt=pm[m].total;const x=grp.free.per_month[m];return `<td>${pctTxt(mt>0?Math.round((x?x.rev:0)/mt*1000)/10:null)}</td>`;}).join('')+`<td class="tot">${pctTxt(grp.free.mix)}</td></tr>`;
+
+    // ── 料件成本（分組；無費這組是重點）──
+    h+=section('料件成本（分有費 / 無費）');
+    h+=sumRow('營業成本(合計)', x=>x.cost, d.cost, {cls:'bold'});
+    h+=subHead('〔有費〕成本');
+    for(const c of paidCats) h+=detRow('　'+c.label, c.key, 'cost', det.totals[c.key].cost);
+    h+=grpRow('　有費成本 小計', grp.paid, 'cost', {cls:'bold'});
+    h+=subHead('〔無費〕成本 ← 不收費卻發生的成本');
+    for(const c of freeCats) h+=detRow('　'+c.label, c.key, 'cost', det.totals[c.key].cost);
+    h+=grpRow('　無費成本 小計', grp.free, 'cost', {cls:'bold'});
+
+    // ── 材料毛利 ──
+    h+=section('材料毛利');
+    h+=sumRow('材料毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
+    h+=pctRow('材料毛利率 %', x=>x.total-x.cost, d.gross_margin);
+    h+=grpMarginRow('　有費材料毛利率 %', grp.paid);
+    h+=grpMarginRow('　無費材料毛利率 %', grp.free);
+  } else {
+    // 無 account_type 明細時退回整包列
+    h+=section('營收');
+    h+=sumRow('總營收', x=>x.total, rev.total, {cls:'bold'});
+    h+=sumRow('　有費營收', x=>x.paid, rev.paid);
+    h+=sumRow('　一般', x=>x.general, rev.general);
+    h+=sumRow('　鈑烤', x=>x.bodywork, rev.bodywork);
+    h+=sumRow('　延保', x=>x.extended, rev.extended);
+    h+=sumRow('　保固其他', x=>x.total-(x.paid||0), rev.warranty_other);
+    h+=section('營收占比（÷總營收）');
+    h+=pctRow('　一般 %', x=>x.general, rev.mix.general);
+    h+=pctRow('　鈑烤 %', x=>x.bodywork, rev.mix.bodywork);
+    h+=pctRow('　延保 %', x=>x.extended, rev.mix.extended);
+    h+=pctRow('　保固其他 %', x=>x.total-(x.paid||0), rev.mix.warranty_other);
+    h+=section('成本 / 材料毛利');
+    h+=sumRow('營業成本', x=>x.cost, d.cost);
+    h+=sumRow('材料毛利額', x=>x.total-x.cost, d.gross_profit, {cls:'bold'});
+    h+=pctRow('材料毛利率 %', x=>x.total-x.cost, d.gross_margin);
+  }
+
+  h+='<tr class="section"><td class="lbl">產能</td>'+ms.map(()=>'<td></td>').join('')+'<td></td></tr>';
+  h+=sumRow('工作天數', x=>x.workdays, d.workdays.total);
+  h+=sumRow('進廠台數', x=>x.units, d.units?d.units.total:null);
+  h+=sumRow('整體單車產值', x=>x.per_car_overall, d.per_car?d.per_car.overall:null);
+
+  h+='</tbody>';
+  document.getElementById('tbl').innerHTML=h;
+}
+
+// 一鍵產生年度預算編列版本：把後續(推估)月份的有費營收(鈑烤/一般/延保)+有費料件成本
+// 寫進 revenue_budget_plan 一個命名版本，之後在「全年損益預算編列」頁載入微調。
+async function genBudget(){
+  if(!_data){ return; }
+  // 需要全年推估才有後續月份的預算值；未勾選就自動開啟並重載
+  if(!document.getElementById('projChk').checked){
+    document.getElementById('projChk').checked = true;
+    await load();
+  }
+  const d=_data;
+  if(!d.projected_months || !d.projected_months.length){
+    alert('沒有可產生的後續月份（結束月已是 12 月、或此年度該廠無實際資料可推估）。'); return;
+  }
+  const det = d.breakdown && d.breakdown.detail;
+  const ver = prompt('預算版本名稱：', `${d.year}預算_初版`);
+  if(!ver || !ver.trim()) return;
+  const items=[];
+  for(const m of d.projected_months){
+    const x=d.per_month[m]||{};
+    const bodywork=Math.round(x.bodywork||0), general=Math.round(x.general||0), extended=Math.round(x.extended||0);
+    // 有費料件成本（與參數頁口徑一致，材料毛利=有費營收-有費成本）；取不到則退用整月成本
+    const paidCost=(det&&det.groups&&det.groups.paid.per_month[m])?Math.round(det.groups.paid.per_month[m].cost):Math.round(x.cost||0);
+    items.push({ month:m, paid:bodywork+general+extended, bodywork, general, extended, cost:paidCost, expense:0 });
+  }
+  try{
+    const r=await fetch('/api/budget-projection/plan',{method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ year:parseInt(val('yearSel')), branch:val('branchSel'), version:ver.trim(), items })});
+    const res=await r.json(); if(!r.ok) throw new Error(res.error||'產生失敗');
+    alert(`✓ 已產生年度預算版本「${ver.trim()}」\n` +
+          `　範圍：${d.projected_months[0]}~12月（${res.written} 個月，1~${d.from===1?(d.to):d.to}月維持 DMS 實際）\n` +
+          `　口徑：有費營收(鈑烤/一般/延保) + 有費料件成本，營業費用預設 0\n\n` +
+          `下一步：到「📊 全年損益預算編列」頁，廠別選 ${val('branchSel')}、版本下拉選「${ver.trim()}」即可載入微調、核定。`);
+  }catch(e){ alert('✗ '+(e.message||'產生失敗')); }
+}
+
+function exportCsv(){
+  if(!_data) return;
+  const d=_data, ms=d.months, pm=d.per_month, rev=d.revenue;
+  const head=['項目',...ms.map(m=>MN[m-1]),'合計/平均'];
+  const lines=[head.join(',')];
+  const row=(label,pick,total)=>lines.push([label,...ms.map(m=>val(pick(pm[m])) ),val(total)].join(','));
+  function val(v){ return v==null?'':Math.round(v); }
+  const det=d.breakdown&&d.breakdown.detail;
+  const grp=det&&det.groups;
+  const gRow=(label,g,field)=>lines.push([label,...ms.map(m=>{const x=g.per_month[m];return val(x?x[field]:0);}),val(g[field])].join(','));
+  const dRow=(label,key,field)=>lines.push([label,...ms.map(m=>{const x=det.per_month[m]&&det.per_month[m][key];return val(x?x[field]:0);}),val(det.totals[key][field])].join(','));
+  row('總營收',x=>x.total,rev.total);
+  if(det){
+    const paidCats=det.categories.filter(c=>c.paid), freeCats=det.categories.filter(c=>!c.paid);
+    lines.push(['〔有費〕營收'].join(','));
+    for(const c of paidCats) dRow('  '+c.label,c.key,'rev');
+    if(grp) gRow('有費營收小計',grp.paid,'rev');
+    lines.push(['〔無費〕營收（重點看成本）'].join(','));
+    for(const c of freeCats) dRow('  '+c.label,c.key,'rev');
+    if(grp) gRow('無費營收小計',grp.free,'rev');
+    row('營業成本(合計)',x=>x.cost,d.cost);
+    lines.push(['〔有費〕成本'].join(','));
+    for(const c of paidCats) dRow('  '+c.label,c.key,'cost');
+    if(grp) gRow('有費成本小計',grp.paid,'cost');
+    lines.push(['〔無費〕成本'].join(','));
+    for(const c of freeCats) dRow('  '+c.label,c.key,'cost');
+    if(grp) gRow('無費成本小計',grp.free,'cost');
+    if(grp){
+      lines.push(['有費材料毛利率%',...ms.map(m=>{const x=grp.paid.per_month[m];return x&&x.rev>0?Math.round((x.rev-x.cost)/x.rev*1000)/10:'';}),grp.paid.margin??''].join(','));
+      lines.push(['無費材料毛利率%',...ms.map(m=>{const x=grp.free.per_month[m];return x&&x.rev>0?Math.round((x.rev-x.cost)/x.rev*1000)/10:'';}),grp.free.margin??''].join(','));
+    }
+  } else {
+    row('有費營收',x=>x.paid,rev.paid);
+    row('一般',x=>x.general,rev.general);
+    row('鈑烤',x=>x.bodywork,rev.bodywork);
+    row('延保',x=>x.extended,rev.extended);
+    row('保固其他',x=>x.total-(x.paid||0),rev.warranty_other);
+    row('營業成本',x=>x.cost,d.cost);
+  }
+  row('材料毛利額',x=>x.total-x.cost,d.gross_profit);
+  lines.push(['材料毛利率%',...ms.map(m=>pm[m].total>0?Math.round((pm[m].total-pm[m].cost)/pm[m].total*1000)/10:''),d.gross_margin??''].join(','));
+  row('工作天數',x=>x.workdays,d.workdays.total);
+  row('進廠台數',x=>x.units,d.units?d.units.total:null);
+  row('整體單車產值',x=>x.per_car_overall,d.per_car?d.per_car.overall:null);
+  // 帳類明細
+  const b=d.breakdown;
+  if(b && b.account_types && b.account_types.length){
+    lines.push('');
+    lines.push(['帳類明細','營收','料件成本','材料毛利','材料毛利率%'].join(','));
+    for(const t of b.account_types) lines.push([t.account_type,Math.round(t.rev),Math.round(t.cost),Math.round(t.gross),t.gross_margin??''].join(','));
+    if(b.bodywork){
+      const bw=b.bodywork;
+      lines.push(['自費鈑烤(一般帳類)',Math.round(bw.self_rev),Math.round(bw.self_cost),Math.round(bw.self_rev-bw.self_cost),''].join(','));
+      lines.push(['保險鈑烤(保險帳類)',Math.round(bw.ins_rev),Math.round(bw.ins_cost),Math.round(bw.ins_rev-bw.ins_cost),''].join(','));
+    }
+  }
+  const csv='﻿'+lines.join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download=`budget_params_${val('yearSel')}_${val('branchSel')}_${d.from}-${d.to}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(a.href);
+}
+
+load();
+</script>
+</body>
+</html>

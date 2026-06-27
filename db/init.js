@@ -3,6 +3,11 @@
  *
  * 讀取用的表（repair_income / revenue_targets / income_config / parts_sales）
  * 由現有 DMS 平台維護，本服務不建立、不修改，只查詢。
+ *
+ * 損益擴充：除四大營收編列值（paid/bodywork/general/extended）外，另存
+ * 「營業成本(cost)」與「營業費用(expense)」兩欄，以編列完整損益
+ * （毛利＝營收−成本、營業淨利＝毛利−費用）。舊資料庫以 ADD COLUMN IF
+ * NOT EXISTS 平滑升級，不影響既有版本資料。
  */
 const pool = require('./pool');
 
@@ -18,13 +23,29 @@ async function init() {
       bodywork    NUMERIC(15,2) DEFAULT 0,
       general     NUMERIC(15,2) DEFAULT 0,
       extended    NUMERIC(15,2) DEFAULT 0,
+      cost        NUMERIC(15,2) DEFAULT 0,
+      expense     NUMERIC(15,2) DEFAULT 0,
       note        TEXT          DEFAULT '',
       updated_at  TIMESTAMPTZ   DEFAULT NOW(),
       updated_by  VARCHAR(50)   DEFAULT '',
       UNIQUE(year, branch, version, period)
     )`);
+  // 損益擴充欄位（沿用舊版資料庫時補欄）
+  await pool.query(`ALTER TABLE revenue_budget_plan ADD COLUMN IF NOT EXISTS cost    NUMERIC(15,2) DEFAULT 0`);
+  await pool.query(`ALTER TABLE revenue_budget_plan ADD COLUMN IF NOT EXISTS expense NUMERIC(15,2) DEFAULT 0`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_rev_budget_plan_lookup
     ON revenue_budget_plan(year, branch, version)`);
+
+  // 工作天數（每年每廠每月；財務手動覆寫值，未填則由月曆預設計算）
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS budget_workdays (
+      year   INTEGER     NOT NULL,
+      branch VARCHAR(10) NOT NULL,
+      month  INTEGER     NOT NULL,
+      days   NUMERIC(5,1) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(year, branch, month)
+    )`);
 }
 
 module.exports = init;

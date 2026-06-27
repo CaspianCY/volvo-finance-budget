@@ -14,17 +14,81 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const initDb = require('./db/init');
+const pool = require('./db/pool');
 
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// 連線字串去敏：只留 host:port/dbname，隱藏帳密（給診斷端點顯示用）
+function maskedTarget() {
+  const raw = process.env.POSTGRES_CONNECTION_STRING || '';
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return `${u.hostname}:${u.port || 5432}${u.pathname || ''}`;
+  } catch {
+    return '(無法解析 POSTGRES_CONNECTION_STRING)';
+  }
+}
+
 // 首頁直接進預算頁
 app.get('/', (req, res) => res.redirect('/budget-projection.html'));
 
-// 健康檢查
-app.get('/healthz', (req, res) => res.json({ ok: true, db: dbReady }));
+// 健康檢查（即時 ping DB；不只看啟動當下的 dbReady）
+app.get('/healthz', async (req, res) => {
+  const out = {
+    ok: true,
+    db_init: dbReady,                       // 啟動時 init 是否成功
+    target: maskedTarget(),                 // 連到哪個 host/DB（去敏）
+    ssl: (process.env.POSTGRES_SSL || 'false').toLowerCase(),
+  };
+  try {
+    const r = await pool.query('SELECT current_database() AS db, current_user AS usr, now() AS now');
+    out.db_connected = true;                // 此刻確實連得到 Postgres
+    out.database = r.rows[0].db;
+    out.db_user = r.rows[0].usr;
+    out.server_time = r.rows[0].now;
+  } catch (e) {
+    out.ok = false;
+    out.db_connected = false;
+    out.db_error = e.message;               // 例如 ECONNREFUSED = 連不到內網 DB
+  }
+  res.status(out.db_connected ? 200 : 503).json(out);
+});
+
+// DMS 來源確認：證明「連到的是正確的內網 DMS 庫」——逐表檢查是否存在 + 概略資料量
+// （不在 /api 的 dbReady 閘門後面，DB 還沒就緒時也能用來診斷）
+app.get('/db-check', async (req, res) => {
+  const tables = ['repair_income', 'revenue_targets', 'income_config', 'parts_sales', 'revenue_budget_plan'];
+  const out = { target: maskedTarget(), checked_at: null, db_connected: false, tables: {} };
+  try {
+    const meta = await pool.query('SELECT current_database() AS db, now() AS now');
+    out.db_connected = true;
+    out.database = meta.rows[0].db;
+    out.checked_at = meta.rows[0].now;
+    for (const t of tables) {
+      try {
+        // to_regclass：表不存在回 NULL（不會丟錯）
+        const reg = await pool.query('SELECT to_regclass($1) AS oid', [`public.${t}`]);
+        if (!reg.rows[0].oid) { out.tables[t] = { exists: false }; continue; }
+        const cnt = await pool.query(`SELECT COUNT(*)::int AS n FROM ${t}`);
+        out.tables[t] = { exists: true, rows: cnt.rows[0].n };
+      } catch (e) {
+        out.tables[t] = { exists: false, error: e.message };
+      }
+    }
+    // 內網 DMS 庫的判準：四張只讀來源表都在，且至少有資料
+    const src = ['repair_income', 'revenue_targets'];
+    out.looks_like_dms = src.every(t => out.tables[t] && out.tables[t].exists);
+    out.has_data = src.some(t => out.tables[t] && out.tables[t].rows > 0);
+  } catch (e) {
+    out.db_error = e.message;
+    return res.status(503).json(out);
+  }
+  res.json(out);
+});
 
 // DB 尚未就緒前，/api/* 回 503（而非模糊 500）
 let dbReady = false;
