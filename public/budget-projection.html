@@ -63,6 +63,21 @@
   .legend-row { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); margin: 6px 0 10px; }
   .legend-row b { color: #e2e8f0; }
   .err { color: #fca5a5; font-size: 13px; padding: 10px; }
+  .dbbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: #1a2332; border: 1px solid #2d3f56; border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px; }
+  .dbbar.ok { border-color: rgba(52,211,153,.45); }
+  .dbbar.bad { border-color: rgba(239,68,68,.5); }
+  .dbbar.warn { border-color: rgba(245,158,11,.5); }
+  .db-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+  .db-dot.ok { background: #34d399; box-shadow: 0 0 8px #34d399; }
+  .db-dot.bad { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+  .db-dot.warn { background: #fbbf24; box-shadow: 0 0 8px #fbbf24; }
+  .db-dot.wait { background: #64748b; }
+  .db-title { font-weight: 800; color: #fff; }
+  .db-meta { color: var(--text-dim); }
+  .db-chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid #2d3f56; background: #16202e; white-space: nowrap; }
+  .db-chip.on { color: #6ee7b7; border-color: rgba(52,211,153,.4); }
+  .db-chip.off { color: #fca5a5; border-color: rgba(239,68,68,.4); }
 </style>
 </head>
 <body>
@@ -74,6 +89,13 @@
 </div>
 
 <div class="container">
+  <!-- 資料庫連線狀態：一進頁面自動檢查（呼叫 /db-check） -->
+  <div id="dbStatus" class="dbbar">
+    <span class="db-dot wait"></span>
+    <span class="db-title">資料庫連線</span>
+    <span class="db-meta">檢查中…</span>
+  </div>
+
   <div class="toolbar">
     <h2 style="font-size:17px;font-weight:900;color:#fff">📊 全年損益預估</h2>
     <select id="yearSel" onchange="loadProjection()"></select>
@@ -744,7 +766,86 @@ function flash(msg) {
   setTimeout(() => { bar.style.color = ''; render(); }, 2500);
 }
 
+// ════════════════════ 資料庫連線狀態 ════════════════════
+function setDbBar(cls, inner) {
+  const el = document.getElementById('dbStatus');
+  if (!el) return;
+  el.className = 'dbbar ' + cls;
+  el.innerHTML = inner +
+    ` <button class="btn" style="margin-left:auto;padding:3px 10px" onclick="checkDbStatus()">🔄 重新檢查</button>`;
+}
+const DB_TABLES = [
+  { key: 'repair_income',      label: 'repair_income（營收/成本）', src: true },
+  { key: 'revenue_targets',    label: 'revenue_targets（目標）',    src: true },
+  { key: 'income_config',      label: 'income_config',              src: false },
+  { key: 'parts_sales',        label: 'parts_sales',                src: false },
+  { key: 'revenue_budget_plan',label: 'revenue_budget_plan（本服務）',src: false },
+];
+function tableChip(t, info) {
+  if (!info || !info.exists) return `<span class="db-chip off">✗ ${esc(t.label)}</span>`;
+  return `<span class="db-chip on">✓ ${esc(t.label)} ${info.rows != null ? info.rows.toLocaleString() + ' 筆' : ''}</span>`;
+}
+async function checkDbStatus() {
+  setDbBar('', `<span class="db-dot wait"></span><span class="db-title">資料庫連線</span><span class="db-meta">檢查中…</span>`);
+  // 先打 /db-check（含 DMS 來源表判定）；舊版部署沒這端點時退而用 /healthz
+  let r;
+  try { r = await fetch('/db-check', { cache: 'no-store' }); }
+  catch (e) {
+    return setDbBar('bad', `<span class="db-dot bad"></span><span class="db-title">🔴 連線檢查失敗</span><span class="db-meta">無法呼叫後端：${esc(e.message)}</span>`);
+  }
+
+  if (r.status === 404) {
+    // 部署的是舊版（沒有 /db-check）→ 用基本 /healthz 試
+    return checkHealthzFallback();
+  }
+
+  let d = {};
+  try { d = await r.json(); } catch (e) { /* 非 JSON */ }
+
+  if (!d.db_connected) {
+    const target = d.target ? `（目標 ${esc(d.target)}）` : '';
+    return setDbBar('bad',
+      `<span class="db-dot bad"></span><span class="db-title">🔴 未連線到資料庫</span>` +
+      `<span class="db-meta">${esc(d.db_error || '連線失敗')} ${target}</span>`);
+  }
+
+  // 已連線：列出來源表狀態與 DMS 判定
+  const chips = DB_TABLES.map(t => tableChip(t, d.tables && d.tables[t.key])).join(' ');
+  const dms = d.looks_like_dms, hasData = d.has_data;
+  const cls = dms && hasData ? 'ok' : 'warn';
+  const dot = dms && hasData ? 'ok' : 'warn';
+  const title = dms && hasData
+    ? '🟢 已連線（DMS 來源就緒）'
+    : (dms ? '🟡 已連線，但來源表沒有資料' : '🟡 已連線，但找不到 DMS 來源表');
+  const verdict = dms && hasData
+    ? ''
+    : `<span class="db-meta">｜${dms ? '⚠ repair_income / revenue_targets 是空的——預算頁不會有數字' : '⚠ 這顆 DB 沒有 DMS 來源表，可能不是 DMS 平台用的那顆 Postgres'}</span>`;
+  setDbBar(cls,
+    `<span class="db-dot ${dot}"></span><span class="db-title">${title}</span>` +
+    `<span class="db-meta">DB: ${esc(d.database || '?')} ＠ ${esc(d.target || '?')}</span> ${chips} ${verdict}`);
+}
+// 舊版部署沒有 /db-check 時，退而用 /healthz 顯示基本連線狀態
+async function checkHealthzFallback() {
+  try {
+    const r = await fetch('/healthz', { cache: 'no-store' });
+    const d = await r.json();
+    const connected = d.db_connected != null ? d.db_connected : d.db;  // 相容強化版/原始版
+    if (connected) {
+      setDbBar('warn',
+        `<span class="db-dot warn"></span><span class="db-title">🟡 已連線（基本檢查）</span>` +
+        `<span class="db-meta">此版本沒有 /db-check，無法確認 DMS 來源表。${d.target ? 'DB ＠ ' + esc(d.target) : ''}｜建議部署含診斷的版本</span>`);
+    } else {
+      setDbBar('bad',
+        `<span class="db-dot bad"></span><span class="db-title">🔴 未連線到資料庫</span>` +
+        `<span class="db-meta">${esc(d.db_error || 'DB 未就緒')}</span>`);
+    }
+  } catch (e) {
+    setDbBar('bad', `<span class="db-dot bad"></span><span class="db-title">🔴 連線檢查失敗</span><span class="db-meta">${esc(e.message)}</span>`);
+  }
+}
+
 // 精簡獨立版：無登入，直接載入。
+checkDbStatus();
 loadProjection();
 </script>
 </body>
